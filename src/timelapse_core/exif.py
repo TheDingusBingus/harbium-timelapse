@@ -14,6 +14,7 @@ never the core's. The core never modifies an original file.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from datetime import datetime
@@ -78,6 +79,10 @@ def _read_with_exiftool(paths: list[Path]) -> dict[Path, Frame]:
 def _read_with_exifread(path: Path) -> Frame:
     import exifread
 
+    # exifread logs a warning for every file it can't parse (every CR3, for a
+    # start). Hundreds of those would bury the messages that matter. The
+    # sequencer reports unreadable settings once, in a sentence.
+    logging.getLogger("exifread").setLevel(logging.ERROR)
     try:
         with open(path, "rb") as f:
             tags = exifread.process_file(f, details=False)

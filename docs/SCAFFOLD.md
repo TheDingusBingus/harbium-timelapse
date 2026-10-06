@@ -6,7 +6,7 @@
 
 **Stack:** Python ≥3.10 · numpy · Pillow · exifread · rawpy (optional, RAW) · ExifTool (optional, external) · pytest · MIT
 
-_Last updated: 2026-10-07. Status: **milestone 1 built and green on synthetic data; awaiting a real sequence** (§8)._
+_Last updated: 2026-10-07. Status: **milestone 1 built, green on synthetic data, awaiting a real sequence** (§8). **Milestone 2 (RapidRAW) built and green against real sidecars**; awaiting a real end-to-end run (§5.3)._
 
 ---
 
@@ -104,21 +104,34 @@ Frames are ordered by capture time when every frame has one. This survives Canon
 
 ---
 
-## 5. RapidRAW — verified facts (milestone 2)
+## 5. RapidRAW (milestone 2)
 
-Checked against RapidRAW's own GitHub releases, October 2026:
+### 5.1 Verified facts
+From RapidRAW's releases and source docs, and from two real sidecars James exported from an EOS R6 (now test fixtures in `integrations/rapidraw/tests/fixtures/`):
 
-- **CLI exists** since v1.6.0: `rapidraw export <path> --output <dir> --format jpeg --quality 90`, and `--adjustments preset.json`. Exports a folder using each image's `.rrdata` sidecar.
-- **`.rrdata` is JSON** and holds all edits.
-- **Since v1.6.3, `.rrdata` is only created once an image has been edited.** The integration must therefore create sidecars that don't exist yet, not assume they do.
-- `--adjustments` appears to apply **one** preset to everything. Per-frame deflicker values must go into **per-frame `.rrdata` files**, not that flag. Confirm.
+- **Sidecar name:** `<image file name>.rrdata`, e.g. `181A0968.CR3.rrdata`. Virtual copies: `181A0968.CR3.<6 hex>.rrdata`.
+- **Format:** JSON, 2-space indent, no trailing newline, non-ASCII written raw (there's a key called `centré`). Top level: `version`, `rating`, `adjustments` (84 keys), `tags`, `exif`.
+- **`adjustments.exposure` is in stops, stored exactly as the slider reads** (slider +1.00 → `1`, +0.33 → `0.33`). Whole numbers are written without a decimal point.
+- **Exposure is a pure linear gain**, `colour × 2^exposure`, applied ahead of the tone mapper. Linear RAW measurements from the core therefore transfer exactly. `brightness` is a different, midtone-shaping slider: **never touch it.**
+- **`exif`** holds the frame's settings as text (`ExposureTime: "1/320 s"`, `FNumber: "f/4"`, `DateTimeOriginal: "2026-09-22 12:21:55"`, `SubSecTimeOriginal`). Used as a fallback when the core can't read a CR3.
+- **CLI:** `rapidraw export <folder> --output <dir> --format jpeg --quality 90`. `--adjustments` applies one preset to all, so per-frame values go in per-frame sidecars.
+- **Since v1.6.3, sidecars only exist for edited frames.** The integration refuses to write until every frame has one, and says how to fix it (paste settings onto all frames).
 
-### OPEN — blocker for milestone 2
-**The exposure key name and units inside `.rrdata` are unknown.** Need a real sidecar: edit one frame in RapidRAW, move only the exposure slider to +1.00, and paste the resulting `.rrdata`. Then a second at +0.33 to confirm the units are stops and linear. Do not guess the schema.
+### 5.2 DECIDED — do not "fix" these
+- **Separate package** (`integrations/rapidraw/`, `timelapse-rapidraw`), depends on the core, never the other way. MIT; it contains no RapidRAW code.
+- **Corrections are added to the frame's own exposure, never written over it.** What gets smoothed is RAW brightness *plus* current exposure, i.e. what the photographer will actually see. A manual ramp is kept and built on.
+- **Ledger** (`.timelapse-core/rapidraw.json`) records each frame's applied correction. Base exposure = current − applied, so re-running replaces rather than stacks, and a manual nudge made after deflicker survives.
+- **Originals** copied once to `.timelapse-core/originals/` before first change. `undo` restores files byte-for-byte (tested).
+- **Only `adjustments.exposure` changes.** Every other byte round-trips identically (tested against the real sidecars). Writes are atomic (`.tmp` + rename).
+- **Virtual copies are left alone.**
+- **Tell the user to close the folder in RapidRAW first.** It may save its in-memory edits over ours. Unverified whether it does; cheaper to warn than to find out on someone's sequence.
 
-Licence position unchanged from the brief: talk to RapidRAW only through sidecars and the CLI. Never vendor, import or link its code.
-
----
+### 5.3 Still to verify on real data
+- [ ] `timelapse-rapidraw check` on a real CR3 folder
+- [ ] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed
+- [ ] Does RapidRAW, with the folder open, overwrite our values? (Decides whether the "close first" warning can go.)
+- [ ] `export` path: where the `rapidraw` command lives in the macOS/Windows install (pass `--rapidraw` until known)
+- [ ] Flicker in the exported render measurably lower than without deflicker
 
 ## 6. Non-negotiables
 
@@ -130,7 +143,7 @@ Licence position unchanged from the brief: talk to RapidRAW only through sidecar
 | Trend preservation | A straight brightness line passes through deflicker unchanged. A test enforces it. |
 | Outliers | A single +2 stop frame moves its neighbours' targets by < 0.05 stops. A test enforces it. |
 | Core isolation | No editor-specific code or imports in `src/timelapse_core/`. |
-| Errors | Plain sentences naming the file. No stack traces for expected problems in the CLI. |
+| Errors | Plain sentences naming the file. No stack traces for expected problems in the CLI. Library warnings (e.g. exifread's per-file noise) are silenced in favour of one summarising Problem. |
 | Dependencies | numpy, Pillow, exifread required. rawpy optional. Nothing else without a reason recorded here. |
 
 ---
@@ -144,10 +157,10 @@ Licence position unchanged from the brief: talk to RapidRAW only through sidecar
 5. ✅ `measure.py` — rank-based, shared band
 6. ✅ `deflicker.py` — robust LOWESS
 7. ✅ `cli.py` — `check`, `deflicker --csv`
-8. ✅ Tests: 24 passing, synthetic sequences with known truth
+8. ✅ Tests: 25 passing, synthetic sequences with known truth
 9. ⏳ **Real sequence** — run on an actual R6 CR3 timelapse (§8). *Nothing in the RAW path has touched a real file yet.*
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
-11. ⬜ `integrations/rapidraw/` — blocked on §5
+11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
 12. ⬜ `ramping.py` — "mark where the light changes"
 13. ⬜ Motion blur simulation
 
@@ -169,6 +182,7 @@ Licence position unchanged from the brief: talk to RapidRAW only through sidecar
 
 ## 9. Open threads
 
+- **RapidRAW EXIF fallback in the core?** Currently integration-only (core must not know RapidRAW). Fine while ExifTool remains the recommendation.
 - **Smooth by time, not frame index?** Currently the x-axis is frame number. Across a missing frame or an interval change, capture time would be more truthful. Small change in `smooth_flicker`; decide after seeing real data.
 - **Region of interest.** Some sequences need deflicker measured on the landscape only, ignoring a moving sky. Possible `area=` parameter, photographer-named.
 - **Iterative passes.** If an editor's exposure isn't a pure linear gain, one pass may under-correct. The integration can re-render, re-measure, and repeat; the core needs nothing new for that.

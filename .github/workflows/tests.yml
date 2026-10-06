@@ -13,3 +13,5 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      - run: pip install -e "integrations/rapidraw[dev]"
+      - run: pytest -q integrations/rapidraw

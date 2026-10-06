@@ -59,7 +59,13 @@ def measure_brightness(
 
     profiles = np.empty((len(paths), _PERCENTS.size))
     for i, path in enumerate(paths):
-        profiles[i] = tone_profile(load_linear(path, speed))
+        try:
+            image = load_linear(path, speed)
+        except ImportError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
+        profiles[i] = tone_profile(image)
         if progress:
             progress(i + 1, len(paths))
     return brightness_from_profiles(profiles)

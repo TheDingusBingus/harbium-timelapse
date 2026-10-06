@@ -52,8 +52,12 @@ def main(argv: list[str] | None = None) -> int:
         if i == n:
             print(file=sys.stderr)
 
-    fix = smooth_flicker(seq, window=args.window, strength=args.strength,
-                         speed="fast" if args.fast else "careful", progress=progress)
+    try:
+        fix = smooth_flicker(seq, window=args.window, strength=args.strength,
+                             speed="fast" if args.fast else "careful", progress=progress)
+    except ValueError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     print(f"  Flicker before: {fix.flicker_before:.3f} stops (typical wobble)")
     print(f"  Largest correction: {fix.largest_correction:.3f} stops")
 

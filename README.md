@@ -4,7 +4,7 @@ Free, open timelapse processing, written in the language photographers already u
 
 Timelapse sequences flicker. Exposure wobbles a fraction of a stop from frame to frame, and in a finished video that wobble reads as a shimmer. Fixing it properly has mostly meant paid tools. This library is a small attempt to do the same job for free, as something other editors can call rather than another app to learn.
 
-It's early. Deflicker works. Day-to-night ramping is next.
+It's early. Deflicker works, and can write straight into RapidRAW. Day-to-night ramping is next.
 
 ## What it does now
 
@@ -55,10 +55,13 @@ fix.by_filename()                          # {"IMG_0001.CR3": +0.04, ...} in sto
 
 The full reasoning lives in the docstrings of [`deflicker.py`](src/timelapse_core/deflicker.py) and [`measure.py`](src/timelapse_core/measure.py).
 
+## RapidRAW
+
+If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-rapidraw` writes the corrections into each frame's exposure for you. See [integrations/rapidraw](integrations/rapidraw/README.md).
+
 ## Plans
 
 - Day-to-night and night-to-day ramps (mark where the light changes; the library handles the curve)
-- [RapidRAW](https://github.com/CyberTimon/RapidRAW) integration through its sidecars and command line
 - Motion blur between frames
 
 ## Licence

@@ -41,3 +41,10 @@ def test_sky_clipping_on_and_off_through_a_sunset_is_measured_exactly(tmp_path):
         write_png16(paths[-1], base * 2**t)
     measured = measure_brightness(paths)
     assert np.abs((measured - measured[-1]) - (truth - truth[-1])).max() < 0.002
+
+
+def test_a_corrupt_file_is_named_in_a_sentence(tmp_path):
+    paths = make_folder(tmp_path, [0, 0, 0])
+    paths[1].write_bytes(b"truncated")
+    with pytest.raises(ValueError, match="Couldn't read the picture in IMG_0002.png"):
+        measure_brightness(paths)
