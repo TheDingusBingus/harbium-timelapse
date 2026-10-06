@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "timelapse-core"
+version = "0.1.0"
+description = "Free, open timelapse processing in photographer language: deflicker, day-to-night ramps, sequence checks."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "pillow>=10",
+  "exifread>=3",
+]
+
+[project.optional-dependencies]
+raw = ["rawpy>=0.21"]
+dev = ["pytest>=8", "rawpy>=0.21"]
+
+[project.scripts]
+timelapse = "timelapse_core.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/timelapse_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
