@@ -128,6 +128,7 @@ def plan(
     speed: str = "careful",
     raw_brightness: np.ndarray | None = None,
     progress=None,
+    blend: int | None = None,
 ) -> Plan:
     """Work out each frame's new exposure. Writes nothing."""
     ledger = _read_ledger(seq.folder)
@@ -136,7 +137,7 @@ def plan(
         raw_brightness = measure_brightness(seq, speed=speed, progress=progress)
 
     seen = np.asarray(raw_brightness, dtype=np.float64) + bases  # exposure is a linear gain
-    fix = smooth_flicker(seq, window=window, strength=strength, brightness=seen)
+    fix = smooth_flicker(seq, window=window, strength=strength, brightness=seen, blend=blend)
     return Plan(
         folder=seq.folder,
         frames=tuple(FramePlan(f, float(b), float(c)) for f, b, c in zip(seq, bases, fix.exposure)),

@@ -6,7 +6,7 @@
 
 **Stack:** Python ≥3.10 · numpy · Pillow · exifread · rawpy (optional, RAW) · ExifTool (optional, external) · pytest · MIT
 
-_Last updated: 2026-10-07. Status: **milestone 1 built, green on synthetic data, awaiting a real sequence** (§8). **Milestone 2 (RapidRAW) built and green against real sidecars**; awaiting a real end-to-end run (§5.3)._
+_Last updated: 2026-10-07. Status: **milestone 1 proven on a real 229-frame R6 sequence; holy-grail ramping added as a result** (§4.4, §8). **Milestone 2 (RapidRAW) built and green against real sidecars**; awaiting a real end-to-end run (§5.3)._
 
 ---
 
@@ -93,8 +93,14 @@ Careful decodes RAW half-size, linear gamma, no auto-brightening, camera WB. A c
 - Bisquare reweighting (4 passes) means one lightning frame doesn't darken its neighbours.
 - Window counts frames, nearest-neighbour style, so edge frames still get a full window.
 
-### 4.4 Deflicker runs *after* ramp compensation
-Deflicker can't tell a planned shutter change from flicker. It would smooth a deliberate step into a slope. Ramping (milestone 3) compensates known EXIF changes first; deflicker cleans what's left. Until then, `check_sequence` flags every setting change so the photographer knows.
+### 4.4 Your exposure changes are taken out, then given back as a gentle ramp (`ramping.py`)
+Deflicker can't tell a deliberate exposure step from flicker. First version smeared a one-stop ND step into a 25-frame fade and built a hump around it. Now:
+1. **Find steps.** *Where*: every camera-setting change, plus any sudden jump that lasts (≥5 frames either side) with no setting change — what a hand-turned ND looks like. Threshold: max(0.3 stops, 4 × typical frame-to-frame noise). Never fired on 20 seeds of pure 0.1-stop flicker.
+2. **Measure each step from the pictures, never from the EXIF.** One straight line through up to 20 frames either side with a jump allowed at the step (shared slope, so a sunset's darkening isn't counted as step). Unbiased; ~0.05 stop typical error at real flicker levels.
+3. **One-frame setting blips are not steps** (f/20, f/22, f/20): set aside, left to the robust smoother as an odd frame.
+4. **Deflicker the light** (brightness minus steps) with `window`; **add the steps back** smoothed over `blend` frames (default max(3 × window, n/3)).
+
+**Why the EXIF sizes aren't trusted** — first real sequence (R6, 229 CR3s, dusk, 2026-10-07): the f/22 frame measured −0.27 against a predicted −0.28, so measurement is sound; but third-stop ISO steps measured anywhere from 0.0 to +0.4, and across 1766–1807 the settings claim +3 stops while the pictures barely move. Cause unknown (simultaneous ND tweaks, the light falling, or Canon's third-stop ISO handling in RAW). Trusting EXIF sizes invented a −0.44 "ND step" and threw the f/22 frame's correction to +0.70. The settings say *where*; the pictures say *how much*.
 
 ### 4.5 ExifTool first, exifread second
 **exifread cannot read CR3** (checked in its source: its ISO-BMFF parser only accepts heic/avif/mif1 brands). James's R6 shoots CR3. ExifTool reads everything, in one batch call per folder. If neither is available the sequence still loads and a Problem says how to fix it.
@@ -160,11 +166,11 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 5. ✅ `measure.py` — rank-based, shared band
 6. ✅ `deflicker.py` — robust LOWESS
 7. ✅ `cli.py` — `check`, `deflicker --csv`
-8. ✅ Tests: 26 passing (one runs real ExifTool when installed), synthetic sequences with known truth
+8. ✅ Tests: 53 passing (one runs real ExifTool when installed), synthetic sequences with known truth plus cases taken from the real R6 sequence
 9. ⏳ **Real sequence** — run on an actual R6 CR3 timelapse (§8). *Nothing in the RAW path has touched a real file yet.*
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
-12. ⬜ `ramping.py` — "mark where the light changes"
+12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4). Manual "mark where the light changes" keyframes still to come if real use asks for it
 13. ⬜ Motion blur simulation
 
 ---
@@ -176,8 +182,8 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - [x] Sunset curve preserved; flicker reduced >10× on synthetic data
 - [x] Lightning frame doesn't drag neighbours
 - [x] CLI reports gaps, setting changes, mixed folders in plain sentences
-- [ ] `timelapse check` on a real CR3 folder reads shutter/aperture/ISO/time (needs ExifTool)
-- [ ] `timelapse deflicker` on that folder completes in careful mode
+- [x] `timelapse check` on a real CR3 folder reads shutter/aperture/ISO/time (229 frames, Windows, external drive)
+- [x] `timelapse deflicker` on that folder completes in careful mode (flicker 0.111 → 0.009 stops)
 - [ ] Corrections applied by hand to a handful of frames in an editor visibly reduce flicker in a render
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
@@ -186,6 +192,8 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 ## 9. Open threads
 
 - **RapidRAW EXIF fallback in the core?** Currently integration-only (core must not know RapidRAW). Fine while ExifTool remains the recommendation.
+- **Third-stop ISO puzzle (§4.4).** Worth a controlled test: same scene, ISO 100/125/160/200, locked everything else. Tells us whether Canon's in-between ISOs reach the RAW data.
+- **Measurement speed.** Real timing on careful mode still unreported; multi-core measurement is the obvious next speed-up.
 - **Smooth by time, not frame index?** Currently the x-axis is frame number. Across a missing frame or an interval change, capture time would be more truthful. Small change in `smooth_flicker`; decide after seeing real data.
 - **Region of interest.** Some sequences need deflicker measured on the landscape only, ignoring a moving sky. Possible `area=` parameter, photographer-named.
 - **Iterative passes.** If an editor's exposure isn't a pure linear gain, one pass may under-correct. The integration can re-render, re-measure, and repeat; the core needs nothing new for that.

@@ -4,13 +4,14 @@ Free, open timelapse processing, written in the language photographers already u
 
 Timelapse sequences flicker. Exposure wobbles a fraction of a stop from frame to frame, and in a finished video that wobble reads as a shimmer. Fixing it properly has mostly meant paid tools. This library is a small attempt to do the same job for free, as something other editors can call rather than another app to learn.
 
-It's early. Deflicker works, and can write straight into RapidRAW. Day-to-night ramping is next.
+It's early. Deflicker works, handles the exposure changes you make while shooting, and can write straight into RapidRAW.
 
 ## What it does now
 
 - **Checks a sequence** before you process it: missing frames, mixed RAW+JPEG folders, exposure setting changes, unreadable files. In sentences, not error codes.
 - **Measures brightness** of every frame, in stops, from the RAW data itself.
 - **Works out deflicker corrections**: how much to brighten or darken each frame so the light follows its real arc without the shimmer.
+- **Smooths out your own exposure changes.** ISO steps, shutter changes, and hand-turned ND filters (found from the pictures, since an ND leaves no trace in the file) are blended into one gentle ramp instead of jolts.
 
 It never touches your original files.
 
@@ -61,7 +62,8 @@ If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-ra
 
 ## Plans
 
-- Day-to-night and night-to-day ramps (mark where the light changes; the library handles the curve)
+- Marking where the light changes by hand, for sequences where automatic isn't enough
+- Faster measuring, using every CPU core
 - Motion blur between frames
 
 ## Licence

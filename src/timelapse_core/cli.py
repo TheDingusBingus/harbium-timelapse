@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="0 to 1, how much flicker to remove (default 1)")
     flick.add_argument("--fast", action="store_true",
                        help="measure from embedded previews: quicker, less exact")
+    flick.add_argument("--blend", type=int, default=None,
+                       help="frames your own exposure changes are spread across (default: a third of the sequence)")
     flick.add_argument("--csv", type=Path, help="save per-frame results to a CSV file")
 
     args = parser.parse_args(argv)
@@ -60,12 +62,14 @@ def main(argv: list[str] | None = None) -> int:
             print(file=sys.stderr)
 
     try:
-        fix = smooth_flicker(seq, window=args.window, strength=args.strength,
+        fix = smooth_flicker(seq, window=args.window, strength=args.strength, blend=args.blend,
                              speed="fast" if args.fast else "careful", progress=progress)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    print(f"  Flicker before: {fix.flicker_before:.3f} stops (typical wobble)")
+    for line in describe_changes(fix):
+        print(line)
+    print(f"  Flicker: {fix.flicker_before:.3f} stops before, {fix.flicker_after:.3f} after (typical frame-to-frame wobble)")
     print(f"  Largest correction: {fix.largest_correction:.3f} stops")
 
     if args.csv:
@@ -76,6 +80,23 @@ def main(argv: list[str] | None = None) -> int:
                 w.writerow([frame.name, f"{b:.4f}", f"{t:.4f}", f"{e:+.4f}"])
         print(f"  Saved {args.csv}")
     return 0
+
+
+def describe_changes(fix) -> list[str]:
+    """Plain-language lines for the exposure steps deflicker found."""
+    if not fix.changes:
+        return []
+    lines = ["  Your exposure changes, blended into a gentle ramp:"]
+    for c in fix.changes:
+        name = fix.frames[c.frame].name
+        if c.cause == "camera settings":
+            why = "camera settings"
+            if c.expected is not None and abs(c.expected - c.stops) >= 0.15:
+                why += f", though the settings alone suggested {c.expected:+.2f}"
+        else:
+            why = "no setting change, so most likely an ND filter"
+        lines.append(f"    {name}: {c.stops:+.2f} stops ({why})")
+    return lines
 
 
 if __name__ == "__main__":

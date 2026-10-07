@@ -20,9 +20,11 @@ matter here:
   headlights is spotted as an outlier and mostly ignored when drawing the
   line, so the frames either side aren't darkened to compensate.
 
-Run this *after* any planned exposure ramp has been compensated (``ramping``,
-coming in a later milestone), or deflicker will smooth a deliberate step into a
-gentle slope rather than removing it.
+Your own exposure changes (ISO steps, a turned ND filter) are handled
+first, by ``ramping``: taken out before smoothing, then added back as one
+long, gentle ramp. Without that, a deliberate one-stop step would be smeared
+into a short fade, and the frames just before it brightened as if they knew
+it was coming.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from __future__ import annotations
 import numpy as np
 
 from .measure import Progress, measure_brightness
+from .ramping import find_exposure_changes
 from .types import FlickerCorrections, Sequence
 
 DEFAULT_WINDOW = 25  # frames: one second of video at 25fps
@@ -42,6 +45,7 @@ def smooth_flicker(
     speed: str = "careful",
     brightness: np.ndarray | None = None,
     progress: Progress | None = None,
+    blend: int | None = None,
 ) -> FlickerCorrections:
     """Work out how much to brighten or darken each frame to remove flicker.
 
@@ -51,6 +55,8 @@ def smooth_flicker(
       for when a little life in the light is wanted.
     - ``speed``: "careful" or "fast". See ``measure_brightness``.
     - ``brightness``: pass measurements you already have to skip measuring.
+    - ``blend``: how many frames your own exposure changes are spread across.
+      Default: a third of the sequence, and never less than three windows.
 
     Nothing is written to any file. Apply the corrections in your editor, or
     through an integration.
@@ -63,12 +69,18 @@ def smooth_flicker(
     if len(brightness) != len(sequence):
         raise ValueError("brightness must have one value per frame")
 
-    target = smooth_brightness(brightness, window)
+    yours, changes = find_exposure_changes(sequence.frames, brightness)
+    if blend is None:
+        blend = max(3 * window, len(brightness) // 3)
+
+    light = brightness - yours
+    target = smooth_brightness(light, window) + smooth_brightness(yours, blend, ignore_outliers=False)
     return FlickerCorrections(
         frames=sequence.frames,
         brightness=brightness,
         target=target,
         exposure=strength * (target - brightness),
+        changes=tuple(changes),
     )
 
 

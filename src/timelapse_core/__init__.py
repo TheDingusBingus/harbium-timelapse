@@ -12,12 +12,13 @@
 from .deflicker import smooth_brightness, smooth_flicker
 from .measure import measure_brightness
 from .sequencer import check_sequence, format_stops, load_sequence
-from .types import FlickerCorrections, Frame, Problem, Sequence
+from .ramping import find_exposure_changes
+from .types import ExposureChange, FlickerCorrections, Frame, Problem, Sequence
 
 __version__ = "0.1.0"
 
 __all__ = [
     "load_sequence", "check_sequence", "measure_brightness",
-    "smooth_flicker", "smooth_brightness", "format_stops",
-    "Frame", "Sequence", "Problem", "FlickerCorrections",
+    "smooth_flicker", "smooth_brightness", "find_exposure_changes", "format_stops",
+    "Frame", "Sequence", "Problem", "FlickerCorrections", "ExposureChange",
 ]

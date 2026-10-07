@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from timelapse_core import load_sequence, measure_brightness, smooth_brightness
+from timelapse_core.cli import describe_changes
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
 from . import apply, check, load, plan, undo
@@ -29,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--window", type=int, default=DEFAULT_WINDOW, help=f"frames to smooth across (default {DEFAULT_WINDOW})")
     d.add_argument("--strength", type=float, default=1.0, help="0 to 1 (default 1)")
     d.add_argument("--fast", action="store_true", help="measure from embedded previews")
+    d.add_argument("--blend", type=int, default=None,
+                   help="frames your own exposure changes are spread across (default: a third of the sequence)")
     d.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
 
     sub.add_parser("undo", help="remove deflicker corrections").add_argument("folder", type=Path)
@@ -78,12 +81,14 @@ def main(argv: list[str] | None = None) -> int:
             print(file=sys.stderr)
 
     try:
-        p = plan(seq, window=args.window, strength=args.strength,
+        p = plan(seq, window=args.window, strength=args.strength, blend=args.blend,
                  speed="fast" if args.fast else "careful", progress=progress)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    print(f"  Flicker found: {p.flicker.flicker_before:.3f} stops (typical wobble)")
+    for line in describe_changes(p.flicker):
+        print(line)
+    print(f"  Flicker: {p.flicker.flicker_before:.3f} stops before, {p.flicker.flicker_after:.3f} after (typical frame-to-frame wobble)")
     print(f"  Largest correction: {p.flicker.largest_correction:.3f} stops")
     if args.dry_run:
         for fp in p.frames[:10]:

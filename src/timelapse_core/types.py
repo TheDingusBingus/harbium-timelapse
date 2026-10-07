@@ -80,6 +80,22 @@ class Problem:
         return f"{prefix}: {self.message}"
 
 
+@dataclass(frozen=True)
+class ExposureChange:
+    """A step in exposure that you made while shooting.
+
+    ``stops`` is how big the step measured in the pictures, positive when
+    the frame got brighter. ``cause`` is "camera settings" (ISO, shutter,
+    aperture) or "not in camera settings" (most often a variable ND filter).
+    ``expected`` is what the camera settings alone predicted, if they changed.
+    """
+
+    frame: int
+    stops: float
+    cause: str
+    expected: float | None = None
+
+
 @dataclass(frozen=True, eq=False)
 class FlickerCorrections:
     """What deflicker found, and what to do about it. All values in stops.
@@ -87,20 +103,36 @@ class FlickerCorrections:
     - ``brightness``: how bright each frame measured
     - ``target``: the smooth curve the sequence should follow
     - ``exposure``: how much to brighten (+) or darken (-) each frame
+    - ``changes``: the exposure steps you made while shooting, which were
+      blended into a gentle ramp rather than treated as flicker
     """
 
     frames: tuple[Frame, ...]
     brightness: np.ndarray
     target: np.ndarray
     exposure: np.ndarray
+    changes: tuple[ExposureChange, ...] = ()
 
     def by_filename(self) -> dict[str, float]:
         return {f.name: float(e) for f, e in zip(self.frames, self.exposure)}
 
     @property
     def flicker_before(self) -> float:
-        """Typical frame-to-frame wobble before correction, in stops."""
-        return float(np.std(self.brightness - self.target))
+        """Typical frame-to-frame wobble before correction, in stops.
+
+        Measured as the spread of differences between neighbouring frames,
+        so a slow sunset or a deliberate ramp doesn't count as flicker.
+        """
+        if len(self.brightness) < 3:
+            return 0.0
+        return float(np.std(np.diff(self.brightness)) / np.sqrt(2))
+
+    @property
+    def flicker_after(self) -> float:
+        """The same measure, once corrections are applied."""
+        if len(self.brightness) < 3:
+            return 0.0
+        return float(np.std(np.diff(self.brightness + self.exposure)) / np.sqrt(2))
 
     @property
     def largest_correction(self) -> float:
