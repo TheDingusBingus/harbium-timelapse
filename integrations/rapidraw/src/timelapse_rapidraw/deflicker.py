@@ -202,6 +202,7 @@ def apply(p: Plan) -> int:
         ledger[fp.frame.name] = {"base": round(fp.base, 4), "applied": round(fp.correction, 4)}
 
     write_ledger(p.folder, ledger)
+    (p.folder / ".timelapse-core" / "refine.json").unlink(missing_ok=True)  # a fresh deflicker: old refine passes no longer apply
     return len(p.frames)
 
 

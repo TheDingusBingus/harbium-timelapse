@@ -48,6 +48,21 @@ timelapse-rapidraw restore ~/Pictures/sunset
 
 Reopen the folder in RapidRAW to see the new exposures.
 
+## Check against a render: refine
+
+Deflicker measures the RAW files. But a strong grade can make RapidRAW's
+Exposure slider act like more than one stop of light (on one real sequence,
+1.4 to 1.8 stops, changing along the sequence), so the render can still
+flicker. `refine` measures your exported render and corrects that:
+
+```bash
+# export every frame from RapidRAW into a folder, then:
+timelapse-rapidraw refine ~/Pictures/sunset ~/Pictures/sunset-export
+# reopen, export again over the old export, and repeat until refine says you're done
+```
+
+Usually one or two passes.
+
 ## What it will and won't touch
 
 - `deflicker` changes only the **Exposure** slider of each frame.

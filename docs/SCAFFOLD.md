@@ -153,6 +153,17 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - **`check` is keyframe-aware:** with ≥2 keyframes it compares every frame with the blend (exposure aside); with 1 it says so; with none, the old "matches the rest" check, now also suggesting purple for a deliberate one-off.
 - **`restore`** copies every sidecar back from `originals/` and clears the ledger. Backups are taken at the first *edit* change (blend or deflicker), **not** at labelling: otherwise `restore` would roll keyframe grades back to before they were made. Restore leaves labels.
 
+### 5.2b FINDING: RapidRAW's Exposure slider is not one stop per unit in a render — `refine`
+First real render (229-frame R6 dusk, six-keyframe grade): **render flicker 0.136 stops, worse than the RAWs' 0.111.** The ledger was correct (predicted 0.008 if the slider were 1:1). Regressing render frame-to-frame changes on RAW changes and slider changes: render moves ~1.5 stops per stop of real light (the grade's contrast), but ~2.5 per stop of slider, i.e. **the slider acted like 1.8× real light in the brighter half and 1.4× at dusk/night.** Corrections overshot and flipped the flicker (1659: RAW +1.01, applied −1.01, render −1.18). One global factor only reaches ~0.076; ~0.074 of the render's flicker wasn't explained by a single factor at all.
+
+Decision: **deflicker on RAW is pass zero; the render has the last word.** `timelapse-rapidraw refine FOLDER EXPORT`:
+- Pass 1: slider strength (render stops per slider stop) from regressing render changes on RAW changes, applied corrections and base exposure.
+- Later passes: strength **per frame** from how each frame's render changed between exports versus how its slider changed (running median, clamped 0.3–6).
+- Step = (smoothed render − render) / strength, clamped ±1 stop per pass; added to the ledger's `applied`, so `undo` still removes all of it.
+- Stops when render flicker < 0.015 stops.
+- History in `.timelapse-core/refine.json`; cleared by deflicker, blend, undo, restore.
+- Simulated with a slider 1.4–1.8× too strong plus 1.5× grade contrast: 0.082 → 0.011 in one pass. Predicted on the real render from its own numbers: 0.136 → ~0.02 after pass 1.
+
 ### 5.3 Still to verify on real data
 - [x] `timelapse-rapidraw check` on a real CR3 folder
 - [x] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed (229 frames, 0.111 → 0.008 stops)
@@ -192,6 +203,7 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
 12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4)
+12c. ✅ `refine` — closed-loop deflicker against the exported render (§5.2b)
 12b. ✅ `timelapse render` — preview MP4 from finished frames via ffmpeg, any names, native size
 12a. ✅ Keyframes — core suggestions + blending; RapidRAW `suggest-keyframes`, `keyframes`, `restore`, keyframe-aware `check` (§4.4a, §5.2a). 63 core + 29 integration tests
 13. ⬜ Motion blur simulation
@@ -207,7 +219,8 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - [x] CLI reports gaps, setting changes, mixed folders in plain sentences
 - [x] `timelapse check` on a real CR3 folder reads shutter/aperture/ISO/time (229 frames, Windows, external drive)
 - [x] `timelapse deflicker` on that folder completes in careful mode (flicker 0.111 → 0.009 stops)
-- [ ] A rendered video, judged by eye (the real proof)
+- [x] A rendered video, judged by eye: **failed** (0.136 stops, worse than the RAWs) → §5.2b, `refine`
+- [ ] Refine passes on the real render bring it under 0.015, and it looks right at full speed
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
 ---

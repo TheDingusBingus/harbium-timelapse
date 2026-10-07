@@ -2,7 +2,7 @@
 undo, restore, export.
 
 Order of work: check → suggest-keyframes → (edit purple keyframes in
-RapidRAW) → keyframes → deflicker → export."""
+RapidRAW) → keyframes → deflicker → export → refine → export → refine…"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from timelapse_core import load_sequence, measure_brightness, smooth_brightness
 from timelapse_core.cli import describe_changes
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
-from . import apply, blend, check, label_keyframes, load, plan, restore, suggest, undo
+from . import apply, blend, check, label_keyframes, load, plan, refine, restore, suggest, undo
 from .keyframes import plan_blend
 
 CLOSE_FIRST = ("Close this folder in RapidRAW before running, and reopen it after. "
@@ -53,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("--dry-run", action="store_true", help="show what would happen, write nothing")
 
     sub.add_parser("restore", help="put every sidecar back as it was before this tool changed it").add_argument("folder", type=Path)
+
+    rf = sub.add_parser("refine", help="improve deflicker using an exported render of the sequence")
+    rf.add_argument("folder", type=Path, help="the RAW sequence")
+    rf.add_argument("export", type=Path, help="folder of exported frames (JPEG/PNG/TIFF), every frame, in order")
+    rf.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
 
     e = sub.add_parser("export", help="render with RapidRAW, then measure the flicker left")
     e.add_argument("folder", type=Path)
@@ -95,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  Looks good.")
         return 1 if any(p.serious for p in problems) else 0
 
+    if args.command == "refine":
+        return _refine(seq, args)
     if args.command == "suggest-keyframes":
         return _suggest(seq, args, problems)
     if args.command == "keyframes":
@@ -178,6 +185,27 @@ def _keyframes(seq, args, problems) -> int:
     print(f"  Updated {result.changed} frames.")
     _report_held(result.held)
     print("  Deflicker was reset by this. Next: timelapse-rapidraw deflicker FOLDER")
+    print(f"  {CLOSE_FIRST}")
+    return 0
+
+
+def _refine(seq, args) -> int:
+    try:
+        result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run)
+    except ValueError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    print(f"  Pass {result.pass_number}. Flicker in the render: {result.flicker_in_render:.3f} stops")
+    if result.nothing_to_do:
+        print("  That's below what anyone can see. Nothing to refine: you're done.")
+        return 0
+    print(f"  In this grade, +1 on Exposure moves the render about {result.slider_strength:.1f} stops.")
+    if args.dry_run:
+        print("  Dry run: nothing written.")
+        return 0
+    print(f"  Updated {result.changed} sidecars.")
+    print("  Next: reopen in RapidRAW, export again (replacing the old export), then run refine again.")
+    print("  Stop once refine says the flicker is below what anyone can see.")
     print(f"  {CLOSE_FIRST}")
     return 0
 

@@ -55,4 +55,6 @@ def write_ledger(folder: Path, frames: dict) -> None:
 
 
 def clear_ledger(folder: Path) -> None:
+    """Forget deflicker, and any refine passes built on it."""
     (folder / STATE_DIR / LEDGER).unlink(missing_ok=True)
+    (folder / STATE_DIR / "refine.json").unlink(missing_ok=True)
