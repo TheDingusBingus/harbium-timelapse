@@ -58,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("folder", type=Path, help="the RAW sequence")
     rf.add_argument("export", type=Path, help="folder of exported frames (JPEG/PNG/TIFF), every frame, in order")
     rf.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
+    rf.add_argument("--no-colour", action="store_true", help="exposure only; leave Temperature alone")
+    rf.add_argument("--white-balance", default="auto",
+                    help='"smooth" (default with ExifTool: follow a heavily smoothed curve of the camera\'s '
+                         'own as-shot Kelvin), "steady" (smooth the render\'s colour itself), "first" '
+                         '(the first frame\'s white balance throughout), or a Kelvin number, e.g. 5600')
 
     sub.add_parser("rebuild", help="after RapidRAW overwrites sidecars: keyframes back, re-blend, re-apply every correction").add_argument("folder", type=Path)
 
@@ -215,19 +220,38 @@ def _keyframes(seq, args, problems) -> int:
 
 
 def _refine(seq, args) -> int:
+    wb = args.white_balance
+    if wb not in ("auto", "smooth", "steady", "first"):
+        try:
+            wb = float(wb)
+        except ValueError:
+            print('--white-balance must be "smooth", "steady", "first" or a Kelvin number like 5600', file=sys.stderr)
+            return 1
     if any(p.kind == "overwritten" for p in check(seq)):
         print("Run rebuild first: these sidecars were overwritten since the last pass.", file=sys.stderr)
         return 1
     try:
-        result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run)
+        result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run,
+                        colour=not args.no_colour, white_balance=wb)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    print(f"  Pass {result.pass_number}. Flicker in the render: {result.flicker_in_render:.3f} stops")
+    print(f"  Pass {result.pass_number}. Flicker in the render: {result.flicker_in_render:.3f} stops"
+          + ("" if result.colour_in_render != result.colour_in_render
+             else f", colour {result.colour_in_render:.3f}"))
     if result.nothing_to_do:
-        print("  That's below what anyone can see. Nothing to refine: you're done.")
+        print("  That's below what anyone can see, in brightness and colour. Nothing to refine: you're done.")
         return 0
-    print(f"  In this grade, +1 on Exposure moves the render about {result.slider_strength:.1f} stops.")
+    if result.slider_strength == result.slider_strength:
+        print(f"  In this grade, +1 on Exposure moves the render about {result.slider_strength:.1f} stops.")
+    else:
+        print("  Brightness is already steady; adjusting colour only.")
+    if result.colour_strength == result.colour_strength:
+        if result.colour_guessed:
+            print("  Temperature: a careful first step, to learn how RapidRAW's slider behaves. "
+                  "The next pass corrects properly.")
+        else:
+            print(f"  Temperature: +10 shifts the render's colour by about {10 * result.colour_strength:+.3f}.")
     if args.dry_run:
         print("  Dry run: nothing written.")
         return 0

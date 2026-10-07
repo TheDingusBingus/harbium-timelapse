@@ -65,6 +65,22 @@ timelapse-rapidraw refine ~/Pictures/sunset ~/Pictures/sunset-export
 
 Usually one or two passes.
 
+Refine fixes **colour** too. If your camera was on Auto white balance, its
+guess jumps from frame to frame, and RapidRAW's Temperature slider is only a
+nudge from each frame's own guess, so pasting can't fix it. By default (with
+ExifTool installed), refine nudges each frame so its white balance follows a
+heavily smoothed curve of the camera's own: the jumps go, the auto look stays.
+
+```bash
+timelapse-rapidraw refine ... --white-balance smooth   # default with ExifTool
+timelapse-rapidraw refine ... --white-balance steady   # smooth the render's colour itself
+timelapse-rapidraw refine ... --white-balance first    # first frame's white balance throughout
+timelapse-rapidraw refine ... --white-balance 5600     # a fixed Kelvin
+timelapse-rapidraw refine ... --no-colour              # exposure only
+```
+
+Better still, next time set a fixed white balance in camera.
+
 ## If RapidRAW saves over your edits
 
 If `check` reports that sidecars were overwritten (every edit suddenly back to

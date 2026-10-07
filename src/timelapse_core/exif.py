@@ -30,7 +30,7 @@ Progress = Callable[[int, int], None]
 
 _EXIFTOOL_TAGS = [
     "-ExposureTime", "-FNumber", "-ISO", "-DateTimeOriginal",
-    "-SubSecTimeOriginal", "-Model",
+    "-SubSecTimeOriginal", "-Model", "-ColorTempAsShot",
 ]
 
 
@@ -80,6 +80,7 @@ def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[st
                 aperture=_positive(rec.get("FNumber")),
                 iso=_positive(rec.get("ISO")),
                 camera=_text(rec.get("Model")),
+                white_balance=_positive(rec.get("ColorTempAsShot")),
             )
         if progress:
             progress(min(start + BATCH, len(paths)), len(paths))

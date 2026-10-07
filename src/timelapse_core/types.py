@@ -29,6 +29,7 @@ class Frame:
     aperture: float | None = None  # f-number, e.g. 8.0
     iso: float | None = None
     camera: str | None = None
+    white_balance: float | None = None  # as-shot, Kelvin (needs ExifTool)
 
     @property
     def name(self) -> str:

@@ -29,7 +29,7 @@ from timelapse_core import (
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
 from .sidecar import (
-    get_exposure, read_sidecar, set_exposure, sidecar_path,
+    get_exposure, get_temperature, read_sidecar, set_exposure, set_temperature, sidecar_path,
     with_sidecar_settings, write_sidecar,
 )
 from .state import clear_ledger, keep_original, read_ledger, write_ledger
@@ -226,7 +226,8 @@ def apply(p: Plan) -> int:
 
 
 def undo(folder: Path | str) -> int:
-    """Take every deflicker correction back out. Your own exposure stays."""
+    """Take every deflicker and refine correction back out (exposure and
+    colour). Your own edit stays."""
     folder = Path(folder)
     ledger = read_ledger(folder)
     changed = 0
@@ -236,6 +237,8 @@ def undo(folder: Path | str) -> int:
         if data is None:
             continue
         set_exposure(data, get_exposure(data) - entry["applied"])
+        if entry.get("applied_temp"):
+            set_temperature(data, get_temperature(data) - entry["applied_temp"])
         write_sidecar(image, data)
         changed += 1
     clear_ledger(folder)

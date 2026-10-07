@@ -26,7 +26,8 @@ from pathlib import Path
 
 from timelapse_core import Sequence
 
-from .sidecar import dump, get_exposure, read_sidecar, set_exposure, sidecar_path, write_sidecar
+from .sidecar import (dump, get_exposure, get_temperature, read_sidecar, set_exposure,
+                      set_temperature, sidecar_path, write_sidecar)
 from .state import STATE_DIR, clear_ledger, read_ledger, write_ledger
 
 
@@ -128,6 +129,8 @@ def rebuild(seq: Sequence) -> tuple[int, int]:
         data = read_sidecar(f.path)
         base = get_exposure(data)
         set_exposure(data, base + entry["applied"])
+        if entry.get("applied_temp"):
+            set_temperature(data, get_temperature(data) + entry["applied_temp"])
         write_sidecar(f.path, data)
         entry["base"] = round(base, 4)
     write_ledger(folder, ledger)

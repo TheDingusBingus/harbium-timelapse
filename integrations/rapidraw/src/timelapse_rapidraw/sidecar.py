@@ -113,3 +113,12 @@ def _time(stamp, subsec) -> datetime | None:
         return None
     digits = "".join(c for c in str(subsec or "") if c.isdigit())
     return when.replace(microsecond=int(digits[:6].ljust(6, "0"))) if digits else when
+
+
+def get_temperature(data: dict) -> float:
+    return float((data.get("adjustments") or {}).get("temperature") or 0.0)
+
+
+def set_temperature(data: dict, value: float) -> None:
+    v = round(float(value), 2)
+    data.setdefault("adjustments", {})["temperature"] = int(v) if v == int(v) else v

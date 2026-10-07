@@ -179,7 +179,13 @@ Decisions:
 ### 5.2d FINDING: Auto white balance is the remaining colour flicker
 After refine (render brightness 0.013), James still saw flicker (leaves, left side) and "sudden jumps in colour warmth". Render colour wobble **0.051** vs **0.021** in the RAW sensor warmth: 2.5× more colour flicker than the light had. Render colour jumps beyond the real light correlate **−0.93** with the camera's as-shot white balance (ExifTool `ColorTempAsShot`: 4845–7415 K, jumps up to 669 K between frames). Biggest jumps at the **hand-turned ND moves** (1634, 1644–45, 1659): a variable ND shifts colour as it turns and AWB re-guesses; the rest at late ISO steps. Brightness was fine; colour wasn't measured by refine at all.
 
-Plan (pending one RapidRAW sidecar with a fixed WB set, to learn the `whiteBalance` schema): **lock white balance** across all frames, keyframe temperature offsets blended on top. Fallback if RapidRAW has no fixed WB: colour refine (temperature slider corrected against render warmth, closed loop like exposure).
+**RapidRAW has no absolute white balance in the sidecar** (James confirmed): Temperature is a nudge from each frame's as-shot WB, and paste copies the nudge, so every frame keeps its Auto starting point. Decision: **colour channel in `refine`**, the same closed loop as exposure, on the Temperature slider:
+- `--white-balance smooth` (**default when ExifTool gives as-shot Kelvin; James's idea**): target = render colour with the camera's as-shot mired replaced by a heavily smoothed curve of it (window max(3×window, n/3)). Removes only the camera's frame-to-frame guessing; keeps the auto look and real colour changes in the light (lamps coming on).
+- `steady`: target = smoothed render colour. Stronger; irons out real colour changes too. Default without Kelvin.
+- `first` / Kelvin number: as if every frame were shot at one white balance; keyframe looks shift.
+- Effect of the camera's guess on the render measured from the export by regression (real R6: **−0.0152 warmth per mired**). Temperature slider strength: first pass from keyframe temperatures across the sequence (levels regression with light colour and as-shot mired; used if fit > 0.5), else a careful capped guess (±10 units); later passes per frame from export-to-export changes, sign learned, within 4× of the overall.
+- Ledger gains `applied_temp`; `undo` and `rebuild` handle it; `--no-colour` skips it. Colour target is stored in refine history for fixed and smooth modes so passes converge on one target.
+- Simulated (real-calibrated AWB effect, ND/ISO jumps, unknown slider scale): steady 0.03+ → < 0.01 in 4 passes; smooth matches the smoothed-Kelvin ideal within 0.05 and keeps a 0.15 lamp warmth step.
 
 Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimmer, not exposure. `timelapse render --blend-frames 2|3` (ffmpeg `tmix`) blends neighbours; on random 0.15-stop jitter it cut wobble 0.114 → 0.034. That's the brief's "motion blur simulation" in its simplest form.
 
@@ -245,7 +251,8 @@ Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimme
 - [ ] RapidRAW-running guard fires on Windows
 - [x] Refine passes bring it under 0.015 (0.136 → 0.022 → **0.013**)
 - [ ] Looks right at full speed: **not yet** (colour from Auto WB, leaf motion: §5.2d)
-- [ ] White balance locked: render colour wobble close to the RAW's 0.021
+- [ ] Colour refine on the real sequence: render colour wobble from 0.051 down near the light's own; no sudden warmth jumps by eye
+- [ ] Cross-check learned Temperature strength against RapidRAW's Kelvin readout
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
 ---
