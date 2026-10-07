@@ -6,7 +6,7 @@
 
 **Stack:** Python ≥3.10 · numpy · Pillow · exifread · rawpy (optional, RAW) · ExifTool (optional, external) · pytest · MIT
 
-_Last updated: 2026-10-07. Status: **milestone 1 proven on a real 229-frame R6 sequence; holy-grail ramping added as a result** (§4.4, §8). **Milestone 2 (RapidRAW) built and green against real sidecars**; awaiting a real end-to-end run (§5.3)._
+_Last updated: 2026-10-07. **First full real run complete:** check → suggest-keyframes → keyframes → deflicker on a 229-frame R6 dusk sequence; scrub-through in RapidRAW looks right._ _Previously: Status: **milestone 1 proven on a real 229-frame R6 sequence; holy-grail ramping added as a result** (§4.4, §8). **Milestone 2 (RapidRAW) built and green against real sidecars**; awaiting a real end-to-end run (§5.3)._
 
 ---
 
@@ -153,14 +153,14 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - **`restore`** copies every sidecar back from `originals/` and clears the ledger. Backups are taken at the first *edit* change (blend or deflicker), **not** at labelling: otherwise `restore` would roll keyframe grades back to before they were made. Restore leaves labels.
 
 ### 5.3 Still to verify on real data
-- [ ] `timelapse-rapidraw check` on a real CR3 folder
-- [ ] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed
+- [x] `timelapse-rapidraw check` on a real CR3 folder
+- [x] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed (229 frames, 0.111 → 0.008 stops)
 - [ ] Does RapidRAW, with the folder open, overwrite our values? (Decides whether the "close first" warning can go.)
 - [ ] `export` path: where the `rapidraw` command lives in the macOS/Windows install (pass `--rapidraw` until known)
 - [ ] Flicker in the exported render measurably lower than without deflicker
-- [ ] **Purple label round trip:** a frame labelled purple in RapidRAW is found by `keyframes --dry-run`, and a frame labelled by `suggest-keyframes --label` shows purple in RapidRAW
-- [ ] Blended in-between frames open in RapidRAW with sensible sliders; held settings behave
-- [ ] Sensor warmth on real CR3s: plausible warming then bluing through the sunset
+- [x] **Purple label round trip:** a frame labelled purple in RapidRAW is found by `keyframes --dry-run`, and a frame labelled by `suggest-keyframes --label` shows purple in RapidRAW
+- [x] Blended in-between frames open in RapidRAW with sensible sliders (223 frames, six keyframes, curves included; rough scrub-through looks right)
+- [x] Sensor warmth on real CR3s: steady (~0.01 frame-to-frame), tracks shade → golden → blue hour → lamp-lit night
 
 ## 6. Non-negotiables
 
@@ -205,7 +205,7 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - [x] CLI reports gaps, setting changes, mixed folders in plain sentences
 - [x] `timelapse check` on a real CR3 folder reads shutter/aperture/ISO/time (229 frames, Windows, external drive)
 - [x] `timelapse deflicker` on that folder completes in careful mode (flicker 0.111 → 0.009 stops)
-- [ ] Corrections applied by hand to a handful of frames in an editor visibly reduce flicker in a render
+- [ ] A rendered video, judged by eye (the real proof)
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
 ---
@@ -218,5 +218,6 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - **Smooth by time, not frame index?** Currently the x-axis is frame number. Across a missing frame or an interval change, capture time would be more truthful. Small change in `smooth_flicker`; decide after seeing real data.
 - **Region of interest.** Some sequences need deflicker measured on the landscape only, ignoring a moving sky. Possible `area=` parameter, photographer-named.
 - **Iterative passes.** If an editor's exposure isn't a pure linear gain, one pass may under-correct. The integration can re-render, re-measure, and repeat; the core needs nothing new for that.
+- **Lens profile omissions.** RapidRAW only wrote `lensMaker`/`lensModel` into keyframes that were opened for editing; three keyframes lacked them, which would have switched lens correction off mid-sequence. Fixed by hand (paste lens settings). Candidate: auto-fill a setting that's identical on every keyframe that has it and missing from the rest, and say so.
 - **Package name.** `timelapse-core` is descriptive but generic on PyPI. Check availability before first release; consider something with more character.
 - LICENSE and README contain `[[ ]]` placeholders (name, GitHub username).
