@@ -225,9 +225,10 @@ def apply(p: Plan) -> int:
     return len(p.frames)
 
 
-def undo(folder: Path | str) -> int:
+def undo(folder: Path | str, colour_only: bool = False) -> int:
     """Take every deflicker and refine correction back out (exposure and
-    colour). Your own edit stays."""
+    colour). Your own edit stays. ``colour_only`` removes just refine's
+    Temperature corrections and keeps the exposure work."""
     folder = Path(folder)
     ledger = read_ledger(folder)
     changed = 0
@@ -236,13 +237,31 @@ def undo(folder: Path | str) -> int:
         data = read_sidecar(image)
         if data is None:
             continue
-        set_exposure(data, get_exposure(data) - entry["applied"])
+        if not colour_only:
+            set_exposure(data, get_exposure(data) - entry["applied"])
         if entry.get("applied_temp"):
             set_temperature(data, get_temperature(data) - entry["applied_temp"])
+            entry["applied_temp"] = 0.0
         write_sidecar(image, data)
         changed += 1
-    clear_ledger(folder)
+    if colour_only:
+        write_ledger(folder, ledger)
+        _forget_colour_history(folder)
+    else:
+        clear_ledger(folder)
     return changed
+
+
+def _forget_colour_history(folder: Path) -> None:
+    """Refine passes keep their exposure history; their colour history goes."""
+    path = folder / ".timelapse-core" / "refine.json"
+    if not path.exists():
+        return
+    history = json.loads(path.read_text(encoding="utf-8"))
+    for record in history.get("passes", []):
+        for key in ("warmth", "applied_temp", "colour_target"):
+            record.pop(key, None)
+    path.write_text(json.dumps(history), encoding="utf-8")
 
 
 # --- ledger -----------------------------------------------------------------

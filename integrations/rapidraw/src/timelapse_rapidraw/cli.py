@@ -39,7 +39,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="frames your own exposure changes are spread across (default: a third of the sequence)")
     d.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
 
-    sub.add_parser("undo", help="remove deflicker corrections").add_argument("folder", type=Path)
+    u = sub.add_parser("undo", help="remove deflicker and refine corrections")
+    u.add_argument("folder", type=Path)
+    u.add_argument("--colour", action="store_true", help="remove only refine's Temperature corrections; keep exposure")
 
     sk = sub.add_parser("suggest-keyframes", help="where keyframes belong, from how the light changes")
     sk.add_argument("folder", type=Path)
@@ -86,7 +88,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.command == "undo":
-        print(f"Removed deflicker from {undo(folder)} frames. {CLOSE_FIRST}")
+        if args.colour:
+            print(f"Removed refine's Temperature corrections from {undo(folder, colour_only=True)} frames; "
+                  f"exposure corrections kept. {CLOSE_FIRST}")
+        else:
+            print(f"Removed deflicker from {undo(folder)} frames. {CLOSE_FIRST}")
         return 0
 
     if args.command == "restore":

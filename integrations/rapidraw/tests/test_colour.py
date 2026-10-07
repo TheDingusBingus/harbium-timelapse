@@ -161,3 +161,16 @@ def test_smooth_is_the_default_only_with_kelvin(tmp_path):
     r = refine(load(tmp_path), render_brightness=np.zeros(40), raw_brightness=np.zeros(40),
                render_warmth=np.random.default_rng(1).normal(0, 0.05, 40), raw_warmth=np.zeros(40))
     assert not r.nothing_to_do                             # fell back to steady without Kelvin
+
+
+def test_colour_only_undo_keeps_the_exposure_work(awb_sequence):
+    folder, images, raw, kelvin, loader = awb_sequence
+    blended_t = temperatures(images)
+    one_pass(folder, images, raw, kelvin, np.zeros(N), loader, white_balance="steady")
+    one_pass(folder, images, raw, kelvin, np.zeros(N), loader, white_balance="steady")
+    exposure_before = exposures(images)
+    undo(folder, colour_only=True)
+    assert np.allclose(temperatures(images), blended_t, atol=0.02)
+    assert np.allclose(exposures(images), exposure_before)
+    history = (folder / ".timelapse-core" / "refine.json").read_text()
+    assert "applied_temp" not in history and "render" in history
