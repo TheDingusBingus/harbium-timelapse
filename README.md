@@ -68,6 +68,28 @@ If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-ra
 - Faster measuring, using every CPU core
 - Motion blur between frames
 
+## Standing on shoulders
+
+Good timelapse tools came first, and this one learned from the problems they
+describe:
+
+- [LRTimelapse](https://lrtimelapse.com), the reference for keyframes, holy
+  grail ramping and visual deflicker.
+- A [white balance smoothing script for darktable](https://discuss.pixls.us/t/fixing-white-balance-color-flicker-in-timelapse-videos-with-a-python-script-for-darktable/16251)
+  on pixls.us, and [dtLapse](https://pypi.org/project/dtlapse/), which smooth
+  Auto white balance and keyframe edits for darktable users.
+
+No code was taken from any of them: everything here is written from scratch.
+The maths it uses is long published: local regression (LOWESS, Cleveland 1979)
+and monotone cubic interpolation (Fritsch and Carlson 1980).
+
+It relies on, without including: [numpy](https://numpy.org) (BSD),
+[Pillow](https://python-pillow.org) (MIT-CMU),
+[exifread](https://github.com/ianare/exif-py) (BSD), and optionally
+[rawpy](https://github.com/letmaik/rawpy) (MIT; its wheels bundle LibRaw, under
+LGPL or CDDL). [ExifTool](https://exiftool.org) and [ffmpeg](https://ffmpeg.org)
+are run as separate programs if you have them installed.
+
 ## Licence
 
 MIT. Use it, change it, build it into something else.
