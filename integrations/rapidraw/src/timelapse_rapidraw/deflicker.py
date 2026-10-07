@@ -98,6 +98,24 @@ def check(seq: Sequence) -> list[Problem]:
     if sidecars and not missing and not broken:
         problems += _check_edits(seq, sidecars)
 
+    if sidecars and not missing and not broken:
+        from .recover import overwritten_frames
+        off = overwritten_frames(seq)
+        if len(off) >= max(3, len(seq) // 10):
+            problems.append(Problem(
+                "overwritten",
+                f"{len(off)} sidecars no longer hold what this tool last wrote (first: {off[0]}). "
+                "RapidRAW has most likely saved over them. Close RapidRAW, then run: "
+                "timelapse-rapidraw rebuild FOLDER",
+                serious=True,
+            ))
+        elif off:
+            problems.append(Problem(
+                "exposure_changed",
+                f"{len(off)} frame{'s' if len(off) != 1 else ''} had exposure changed since this tool "
+                f"last wrote it (first: {off[0]}). Your change will be kept next time deflicker runs.",
+            ))
+
     if any(_VIRTUAL_COPY.search(p.name) for p in seq.folder.iterdir()):
         problems.append(Problem(
             "virtual_copies",

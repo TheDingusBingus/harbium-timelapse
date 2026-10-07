@@ -164,6 +164,16 @@ Decision: **deflicker on RAW is pass zero; the render has the last word.** `time
 - History in `.timelapse-core/refine.json`; cleared by deflicker, blend, undo, restore.
 - Simulated with a slider 1.4–1.8× too strong plus 1.5× grade contrast: 0.082 → 0.011 in one pass. Predicted on the real render from its own numbers: 0.136 → ~0.02 after pass 1.
 
+### 5.2c INCIDENT: RapidRAW saved its defaults over every sidecar — guard + `rebuild`
+Refine pass 1 ran with RapidRAW closed and worked: the next export measured **0.022 stops** (from 0.136). Pass 2 ran **with RapidRAW open on the folder**. Afterwards every sidecar held RapidRAW's *defaults* (exposure 0, Basic tone mapper, flat curve, no grade), keyframes included; only colour labels survived. Refine didn't write that: reproduced here with the real ledger and measurements, it writes valid files with exposure ≈ −0.83 and nothing else changed. Exposure 0 means RapidRAW saved *after* refine; most likely it re-read files mid-replacement, failed, fell back to defaults and saved them.
+
+Decisions:
+- **Every writing command refuses while a RapidRAW process is running** (`tasklist` on Windows, `ps` elsewhere; matches "rapidraw"). `--force` overrides. Reading commands (`check`, dry runs) always allowed. The old "close the folder first" warning wasn't enough.
+- **`check` detects overwrites:** frames whose exposure ≠ the ledger's base + applied. ≥ max(3, n/10) → serious `overwritten`, pointing to `rebuild`; fewer → a note (your deliberate tweak, kept next deflicker). `deflicker` and `refine` refuse to build on overwritten sidecars.
+- **`rebuild`**: originals back (current labels kept), ledger set aside, re-blend between keyframes, every ledger correction re-applied, ledger and refine history restored. Tested: a graded, keyframed, deflickered, refined sequence overwritten with defaults comes back setting-for-setting.
+- Found while building: `rebuild` must set the ledger aside before blending, or the blend subtracts deflicker from keyframe originals that never had it.
+- **Unverified:** the RapidRAW process name on Windows contains "rapidraw". Test: run any writing command with RapidRAW open; it must refuse.
+
 ### 5.3 Still to verify on real data
 - [x] `timelapse-rapidraw check` on a real CR3 folder
 - [x] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed (229 frames, 0.111 → 0.008 stops)
@@ -203,6 +213,7 @@ Decision: **deflicker on RAW is pass zero; the render has the last word.** `time
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
 12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4)
+12d. ✅ RapidRAW-running guard, overwrite detection in `check`, `rebuild` (§5.2c)
 12c. ✅ `refine` — closed-loop deflicker against the exported render (§5.2b)
 12b. ✅ `timelapse render` — preview MP4 from finished frames via ffmpeg, any names, native size
 12a. ✅ Keyframes — core suggestions + blending; RapidRAW `suggest-keyframes`, `keyframes`, `restore`, keyframe-aware `check` (§4.4a, §5.2a). 63 core + 29 integration tests
@@ -220,7 +231,10 @@ Decision: **deflicker on RAW is pass zero; the render has the last word.** `time
 - [x] `timelapse check` on a real CR3 folder reads shutter/aperture/ISO/time (229 frames, Windows, external drive)
 - [x] `timelapse deflicker` on that folder completes in careful mode (flicker 0.111 → 0.009 stops)
 - [x] A rendered video, judged by eye: **failed** (0.136 stops, worse than the RAWs) → §5.2b, `refine`
-- [ ] Refine passes on the real render bring it under 0.015, and it looks right at full speed
+- [x] Refine pass 1 on the real render: 0.136 → **0.022** stops
+- [ ] `rebuild` restores the real sequence after the RapidRAW overwrite (§5.2c)
+- [ ] RapidRAW-running guard fires on Windows
+- [ ] Refine passes bring it under 0.015, and it looks right at full speed
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
 ---

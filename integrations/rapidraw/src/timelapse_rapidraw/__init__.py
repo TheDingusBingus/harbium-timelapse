@@ -14,12 +14,13 @@
 
 from .deflicker import FramePlan, Plan, apply, check, load, plan, undo
 from .keyframes import KEYFRAME_LABEL, blend, keyframes_in, label_keyframes, suggest
+from .recover import rapidraw_running, rebuild
 from .refine import refine
 from .state import restore
 
 __version__ = "0.1.0"
 __all__ = [
-    "load", "check", "plan", "apply", "undo", "restore", "refine",
+    "load", "check", "plan", "apply", "undo", "restore", "refine", "rebuild", "rapidraw_running",
     "suggest", "label_keyframes", "keyframes_in", "blend", "KEYFRAME_LABEL",
     "Plan", "FramePlan",
 ]

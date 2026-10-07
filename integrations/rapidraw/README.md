@@ -9,7 +9,9 @@ into each frame's exposure in RapidRAW's own sidecar files.
 1. In RapidRAW, edit one frame of the sequence the way you want it.
 2. Copy its settings and paste them onto every frame. This creates the sidecar
    file each frame needs.
-3. Close the folder in RapidRAW.
+3. **Close RapidRAW completely.** Every command that changes sidecars refuses
+   to run while it's open: with the folder open, RapidRAW can save its own copy
+   over them.
 
 ## Use
 
@@ -62,6 +64,18 @@ timelapse-rapidraw refine ~/Pictures/sunset ~/Pictures/sunset-export
 ```
 
 Usually one or two passes.
+
+## If RapidRAW saves over your edits
+
+If `check` reports that sidecars were overwritten (every edit suddenly back to
+defaults), close RapidRAW and run:
+
+```bash
+timelapse-rapidraw rebuild ~/Pictures/sunset
+```
+
+It puts your keyframes back from the saved originals, re-blends between them,
+and re-applies every deflicker and refine correction.
 
 ## What it will and won't touch
 

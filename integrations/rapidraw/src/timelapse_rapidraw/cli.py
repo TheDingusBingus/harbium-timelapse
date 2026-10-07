@@ -16,16 +16,16 @@ from timelapse_core import load_sequence, measure_brightness, smooth_brightness
 from timelapse_core.cli import describe_changes
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
-from . import apply, blend, check, label_keyframes, load, plan, refine, restore, suggest, undo
+from . import apply, blend, check, label_keyframes, load, plan, rebuild, refine, restore, suggest, undo
+from .recover import RUNNING_MESSAGE, rapidraw_running
 from .keyframes import plan_blend
 
-CLOSE_FIRST = ("Close this folder in RapidRAW before running, and reopen it after. "
-               "RapidRAW may otherwise save its own copy over the new exposures.")
+CLOSE_FIRST = "Reopen RapidRAW to see the changes."
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="timelapse-rapidraw",
-                                 description="Deflicker RapidRAW timelapses. " + CLOSE_FIRST)
+                                 description="Deflicker RapidRAW timelapses. Close RapidRAW before any command that changes sidecars.")
     sub = ap.add_subparsers(dest="command", required=True)
 
     sub.add_parser("check", help="look over a sequence and its RapidRAW edits").add_argument("folder", type=Path)
@@ -59,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("export", type=Path, help="folder of exported frames (JPEG/PNG/TIFF), every frame, in order")
     rf.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
 
+    sub.add_parser("rebuild", help="after RapidRAW overwrites sidecars: keyframes back, re-blend, re-apply every correction").add_argument("folder", type=Path)
+
+    for name, command in sub.choices.items():
+        if name not in ("check", "export"):
+            command.add_argument("--force", action="store_true", help="run even if RapidRAW seems to be open")
+
     e = sub.add_parser("export", help="render with RapidRAW, then measure the flicker left")
     e.add_argument("folder", type=Path)
     e.add_argument("output", type=Path)
@@ -67,6 +73,12 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     folder = args.folder.expanduser()
+
+    writes = args.command in ("deflicker", "keyframes", "refine", "undo", "restore", "rebuild") \
+        or (args.command == "suggest-keyframes" and args.label)
+    if writes and not getattr(args, "dry_run", False) and not getattr(args, "force", False) and rapidraw_running():
+        print(RUNNING_MESSAGE, file=sys.stderr)
+        return 1
 
     if args.command == "undo":
         print(f"Removed deflicker from {undo(folder)} frames. {CLOSE_FIRST}")
@@ -100,14 +112,27 @@ def main(argv: list[str] | None = None) -> int:
             print("  Looks good.")
         return 1 if any(p.serious for p in problems) else 0
 
+    if args.command == "rebuild":
+        try:
+            frames, keys = rebuild(seq)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+        print(f"  Rebuilt {frames} sidecars: your {keys} keyframes from the saved originals, "
+              "the blend between them, and every deflicker and refine correction.")
+        print(f"  {CLOSE_FIRST}")
+        return 0
     if args.command == "refine":
         return _refine(seq, args)
     if args.command == "suggest-keyframes":
         return _suggest(seq, args, problems)
     if args.command == "keyframes":
         return _keyframes(seq, args, problems)
-    if any(p.serious for p in problems) and not args.dry_run:
+    if any(p.serious and p.kind != "overwritten" for p in problems) and not args.dry_run:
         print("Not writing anything until the problems above are sorted.")
+        return 1
+    if any(p.kind == "overwritten" for p in problems) and not args.dry_run:
+        print("Run rebuild first: deflicker on top of overwritten sidecars would build on RapidRAW's defaults.")
         return 1
 
     def progress(i, n):
@@ -190,6 +215,9 @@ def _keyframes(seq, args, problems) -> int:
 
 
 def _refine(seq, args) -> int:
+    if any(p.kind == "overwritten" for p in check(seq)):
+        print("Run rebuild first: these sidecars were overwritten since the last pass.", file=sys.stderr)
+        return 1
     try:
         result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run)
     except ValueError as e:
