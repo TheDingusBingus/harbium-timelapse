@@ -200,3 +200,53 @@ def test_non_keyframes_missing_settings_dont_matter(tmp_path):
     result = blend(load(tmp_path))
     assert result.held == {}
     assert len(read_sidecar(images[10])["adjustments"]) == len(read_sidecar(images[0])["adjustments"])
+
+
+# --- curves -----------------------------------------------------------------
+
+def curve(*points):
+    return [{"x": x, "y": y} for x, y in points]
+
+
+def test_curves_with_different_points_blend(sunset_folder):
+    folder, images = sunset_folder
+    edit(images[30], curves__luma=curve((0, 0), (128, 150), (255, 255)))   # a lift added at golden hour
+    edit(images[59], curves__luma=curve((0, 10), (64, 50), (192, 210), (255, 245)))
+    result = blend(load(folder))
+    assert not any(k.startswith("curves") for k in result.held)
+
+    mid = adjustment(images[15], "curves__luma")
+    assert [p["x"] for p in mid] == [0, 64, 128, 192, 255]           # every x any keyframe uses
+    at_128 = {p["x"]: p["y"] for p in mid}[128]
+    assert 128 < at_128 < 150                                         # on its way to the lift
+    lifts = [{p["x"]: p["y"] for p in adjustment(i, "curves__luma")}[128] for i in images[1:30]]
+    assert lifts == sorted(lifts) and 128 <= lifts[0] and lifts[-1] <= 150   # rises steadily, no wobble
+
+
+def test_keyframes_are_never_rewritten(sunset_folder):
+    folder, images = sunset_folder
+    edit(images[30], curves__luma=curve((0, 0), (128, 150), (255, 255)))
+    keys = [images[0], images[30], images[59]]
+    before = [sidecar_path(i).read_bytes() for i in keys]
+    blend(load(folder))
+    assert [sidecar_path(i).read_bytes() for i in keys] == before
+
+
+def test_flat_line_clipping_blends(sunset_folder):
+    """RapidRAW lets the end points slide along x to clip blacks or whites."""
+    folder, images = sunset_folder
+    edit(images[59], curves__luma=curve((20, 0), (255, 255)))         # blacks clipped at night
+    blend(load(folder))
+    mid = {p["x"]: p["y"] for p in adjustment(images[45], "curves__luma")}
+    assert set(mid) == {0, 20, 255}
+    assert mid[0] == 0 and mid[255] == 255
+    assert 0 < mid[20] < 20                                           # clipping eases in
+
+
+def test_curve_tracing_matches_the_points():
+    from timelapse_rapidraw.keyframes import _curve_at
+    c = curve((0, 0), (128, 150), (255, 255))
+    assert _curve_at(c, [0, 128, 255]) == [0, 150, 255]
+    traced = _curve_at(c, list(range(256)))
+    assert all(a <= b for a, b in zip(traced, traced[1:]))           # monotone: no new bumps
+    assert _curve_at(curve((20, 5), (255, 255)), [0, 10]) == [5, 5]   # flat before the first point

@@ -6,8 +6,13 @@ keyframes either side of it. Every setting is blended, not just exposure.
 
 How each setting is blended:
 
-- **Numbers** (temperature, contrast, shadows, curve points...): a smooth
-  curve through the keyframes. Whole-number settings stay whole numbers.
+- **Numbers** (temperature, contrast, shadows...): a smooth curve through
+  the keyframes. Whole-number settings stay whole numbers.
+- **Tone curves**, even with different points at different keyframes: each
+  keyframe's curve is read at every point position any keyframe uses (traced
+  the way RapidRAW draws curves), and the heights are blended.
+- **Keyframes themselves are never rewritten.** Your edit there stays exactly
+  as you made it.
 - **The same at every keyframe:** copied exactly, untouched.
 - **Can't be blended** (on/off switches, the tone mapper, masks or curves
   shaped differently at different keyframes): each frame takes the setting
@@ -113,6 +118,8 @@ def plan_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> tuple[list[dict], 
     held: dict[str, str] = {}
     names = [seq[i].name for i in keys]
     per_frame = _blend(key_edits, keys, names, len(seq), "", held)
+    for j, i in enumerate(keys):  # a keyframe is your edit, exactly. Never a reconstruction of it.
+        per_frame[i] = copy.deepcopy(key_edits[j])
     return per_frame, keys, dict(sorted(held.items()))
 
 
@@ -184,6 +191,9 @@ def _blend(values: list, keys: list[int], names: list[str], n: int, path: str, h
                    for k in order}
         return [{k: columns[k][i] for k in order if columns[k][i] is not _MISSING} for i in range(n)]
 
+    if all(_is_curve(v) for v in values) and not _same_points(values):
+        return _blend_curves(values, keys, n)
+
     if all(isinstance(v, list) for v in values) and len({len(v) for v in values}) == 1:
         columns = [_blend([v[j] for v in values], keys, names, n, f"{path}[{j}]", held)
                    for j in range(len(first))]
@@ -199,6 +209,59 @@ def _hold(values: list, keys: list[int], n: int) -> list:
     for i in range(n):
         k = max((j for j, key in enumerate(keys) if key <= i), default=0)
         out.append(copy.deepcopy(values[k]) if values[k] is not _MISSING else _MISSING)
+    return out
+
+
+def _is_curve(v) -> bool:
+    """A tone curve: two or more {x, y} points, left to right."""
+    return (isinstance(v, list) and len(v) >= 2
+            and all(isinstance(p, dict) and set(p) == {"x", "y"} and _is_number(p["x"]) and _is_number(p["y"])
+                    for p in v)
+            and all(a["x"] < b["x"] for a, b in zip(v, v[1:])))
+
+
+def _same_points(curves: list) -> bool:
+    """Same number of points at the same x positions: blend point by point."""
+    return len({tuple(p["x"] for p in c) for c in curves}) == 1
+
+
+def _blend_curves(curves: list, keys: list[int], n: int) -> list:
+    """Curves with different points. Give every keyframe's curve the same
+    points (every x any keyframe uses), reading each curve's shape between its
+    own points the way RapidRAW draws it (cubic Hermite, monotone, flat beyond
+    the end points), then blend the height at each x across keyframes."""
+    xs = sorted({p["x"] for c in curves for p in c})
+    heights = np.array([_curve_at(c, xs) for c in curves])           # keyframes × xs
+    blended = np.array([blend_between(keys, heights[:, j], n) for j in range(len(xs))])  # xs × frames
+    whole = all(isinstance(p["y"], int) for c in curves for p in c)
+    return [[{"x": x, "y": int(round(blended[j, i])) if whole else _tidy(blended[j, i])}
+             for j, x in enumerate(xs)] for i in range(n)]
+
+
+def _curve_at(points: list[dict], xs: list[float]) -> list[float]:
+    """Height of one curve at each x: monotone cubic Hermite through its
+    points, flat before the first point and after the last."""
+    px = np.array([p["x"] for p in points], dtype=np.float64)
+    py = np.array([p["y"] for p in points], dtype=np.float64)
+    h, d = np.diff(px), np.diff(py) / np.diff(px)
+    m = np.empty(len(px))
+    m[0], m[-1] = d[0], d[-1]
+    for k in range(1, len(px) - 1):
+        if d[k - 1] * d[k] > 0:
+            w1, w2 = 2 * h[k] + h[k - 1], h[k] + 2 * h[k - 1]
+            m[k] = (w1 + w2) / (w1 / d[k - 1] + w2 / d[k])
+        else:
+            m[k] = 0.0
+    out = []
+    for x in xs:
+        if x <= px[0]:
+            out.append(py[0]); continue
+        if x >= px[-1]:
+            out.append(py[-1]); continue
+        j = int(np.searchsorted(px, x, side="right") - 1)
+        t = (x - px[j]) / h[j]
+        out.append((1 + 2 * t) * (1 - t) ** 2 * py[j] + t * (1 - t) ** 2 * h[j] * m[j]
+                   + t * t * (3 - 2 * t) * py[j + 1] + t * t * (t - 1) * h[j] * m[j + 1])
     return out
 
 
