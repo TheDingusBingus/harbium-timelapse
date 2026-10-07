@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from .deflicker import DEFAULT_WINDOW, smooth_flicker
+from .measure import measure_light
 from .sequencer import check_sequence, load_sequence
 
 
@@ -62,8 +63,9 @@ def main(argv: list[str] | None = None) -> int:
             print(file=sys.stderr)
 
     try:
+        brightness, warmth = measure_light(seq, speed="fast" if args.fast else "careful", progress=progress)
         fix = smooth_flicker(seq, window=args.window, strength=args.strength, blend=args.blend,
-                             speed="fast" if args.fast else "careful", progress=progress)
+                             brightness=brightness)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
@@ -75,9 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.csv:
         with open(args.csv, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["frame", "brightness_stops", "target_stops", "correction_stops"])
-            for frame, b, t, e in zip(fix.frames, fix.brightness, fix.target, fix.exposure):
-                w.writerow([frame.name, f"{b:.4f}", f"{t:.4f}", f"{e:+.4f}"])
+            w.writerow(["frame", "brightness_stops", "target_stops", "correction_stops", "warmth"])
+            for frame, b, t, e, c in zip(fix.frames, fix.brightness, fix.target, fix.exposure, warmth):
+                w.writerow([frame.name, f"{b:.4f}", f"{t:.4f}", f"{e:+.4f}", f"{c:.4f}"])
         print(f"  Saved {args.csv}")
     return 0
 
