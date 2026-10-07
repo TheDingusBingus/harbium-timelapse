@@ -153,6 +153,7 @@ def _check_matching_edits(sidecars: list[tuple[str, dict]]) -> list[Problem]:
     def look(d: dict) -> dict:
         adj = dict(d.get("adjustments") or {})
         adj.pop("exposure", None)
+        adj.pop("whiteBalance", None)   # set per frame on purpose by the white-balance command
         return adj
 
     looks = [(name, look(d)) for name, d in sidecars]
@@ -218,7 +219,7 @@ def apply(p: Plan) -> int:
         data = read_sidecar(fp.frame.path)
         set_exposure(data, fp.exposure)
         write_sidecar(fp.frame.path, data)
-        ledger[fp.frame.name] = {"base": round(fp.base, 4), "applied": round(fp.correction, 4)}
+        ledger.setdefault(fp.frame.name, {}).update(base=round(fp.base, 4), applied=round(fp.correction, 4))
 
     write_ledger(p.folder, ledger)
     (p.folder / ".timelapse-core" / "refine.json").unlink(missing_ok=True)  # a fresh deflicker: old refine passes no longer apply
@@ -247,6 +248,13 @@ def undo(folder: Path | str, colour_only: bool = False) -> int:
     if colour_only:
         write_ledger(folder, ledger)
         _forget_colour_history(folder)
+    elif any("white_balance_before" in e for e in ledger.values()):
+        # Keep what white balance needs to undo itself; exposure is back to base.
+        kept = {name: {"base": round(get_exposure(read_sidecar(folder / name) or {}), 4), "applied": 0.0,
+                       **{k: v for k, v in e.items() if k.startswith("white_balance")}}
+                for name, e in ledger.items() if "white_balance_before" in e}
+        write_ledger(folder, kept)
+        (folder / ".timelapse-core" / "refine.json").unlink(missing_ok=True)
     else:
         clear_ledger(folder)
     return changed

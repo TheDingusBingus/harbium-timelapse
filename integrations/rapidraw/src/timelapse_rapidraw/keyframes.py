@@ -130,9 +130,13 @@ def blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> BlendResult:
         raise ValueError(f"{len(missing)} frames have no RapidRAW sidecar (first: {missing[0]}). "
                          "Paste settings onto every frame first.")
     per_frame, keys, held = plan_blend(seq, label)
+    ledger = read_ledger(seq.folder)
+    steady_wb = {name: e for name, e in ledger.items() if "white_balance" in e}
     changed = 0
     for f, adj in zip(seq, per_frame):
         data = read_sidecar(f.path)
+        if f.name in steady_wb:          # white balance set by the white-balance command stays
+            adj = {**adj, "whiteBalance": steady_wb[f.name]["white_balance"]}
         if data.get("adjustments") == adj:
             continue
         keep_original(f.path)
@@ -140,6 +144,13 @@ def blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> BlendResult:
         write_sidecar(f.path, data)
         changed += 1
     clear_ledger(seq.folder)
+    if steady_wb:   # keep what white balance needs to undo itself
+        from .sidecar import get_exposure
+        from .state import write_ledger
+        write_ledger(seq.folder, {
+            name: {"base": round(get_exposure(read_sidecar(seq.folder / name) or {}), 4), "applied": 0.0,
+                   **{k: v for k, v in e.items() if k.startswith("white_balance")}}
+            for name, e in steady_wb.items()})
     return BlendResult([seq[i].name for i in keys], changed, held)
 
 
@@ -151,8 +162,9 @@ def frames_off_the_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> list[tup
     for f, expected in zip(seq, per_frame):
         actual = dict((read_sidecar(f.path) or {}).get("adjustments") or {})
         expected = dict(expected)
-        actual.pop("exposure", None)
-        expected.pop("exposure", None)
+        for per_frame_setting in ("exposure", "whiteBalance"):
+            actual.pop(per_frame_setting, None)
+            expected.pop(per_frame_setting, None)
         differ = sorted(k for k in set(actual) | set(expected) if not _close(actual.get(k), expected.get(k)))
         if differ:
             off.append((f.name, differ))

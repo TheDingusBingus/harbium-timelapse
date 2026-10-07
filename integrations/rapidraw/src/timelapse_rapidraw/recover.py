@@ -131,6 +131,8 @@ def rebuild(seq: Sequence) -> tuple[int, int]:
         set_exposure(data, base + entry["applied"])
         if entry.get("applied_temp"):
             set_temperature(data, get_temperature(data) + entry["applied_temp"])
+        if "white_balance" in entry:
+            data.setdefault("adjustments", {})["whiteBalance"] = entry["white_balance"]
         write_sidecar(f.path, data)
         entry["base"] = round(base, 4)
     write_ledger(folder, ledger)

@@ -7,6 +7,8 @@ RapidRAW) → keyframes → deflicker → export → refine → export → refin
 from __future__ import annotations
 
 import argparse
+
+import numpy as np
 import shutil
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from timelapse_core.deflicker import DEFAULT_WINDOW
 
 from . import apply, blend, check, label_keyframes, load, plan, rebuild, refine, restore, suggest, undo
 from .recover import RUNNING_MESSAGE, rapidraw_running
+from .whitebalance import DEFAULT_SMOOTHNESS, apply_white_balance, plan_white_balance, undo_white_balance
 from .keyframes import plan_blend
 
 CLOSE_FIRST = "Reopen RapidRAW to see the changes."
@@ -60,11 +63,24 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("folder", type=Path, help="the RAW sequence")
     rf.add_argument("export", type=Path, help="folder of exported frames (JPEG/PNG/TIFF), every frame, in order")
     rf.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
-    rf.add_argument("--no-colour", action="store_true", help="exposure only; leave Temperature alone")
+    rf.add_argument("--colour", action="store_true",
+                    help="also correct colour via the relative Temperature slider (experimental; "
+                         "for camera white balance jumps, use the white-balance command instead)")
     rf.add_argument("--white-balance", default="auto",
                     help='"smooth" (default with ExifTool: follow a heavily smoothed curve of the camera\'s '
                          'own as-shot Kelvin), "steady" (smooth the render\'s colour itself), "first" '
                          '(the first frame\'s white balance throughout), or a Kelvin number, e.g. 5600')
+
+    w = sub.add_parser("white-balance", help="give every frame a steady white balance, in Kelvin")
+    w.add_argument("folder", type=Path)
+    w.add_argument("--to", default="smooth",
+                   help='"smooth" (default: the camera\'s as-shot Kelvin, heavily smoothed), '
+                        '"first" (the first frame\'s), or a Kelvin number, e.g. 5600')
+    w.add_argument("--smoothness", type=int, default=DEFAULT_SMOOTHNESS,
+                   help=f"frames to smooth across (default {DEFAULT_SMOOTHNESS}); more is calmer, less follows the light more closely")
+    w.add_argument("--tint", type=float, default=0.0, help="tint to set alongside (default 0)")
+    w.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
+    w.add_argument("--undo", action="store_true", help="put back each frame's previous white balance")
 
     sub.add_parser("rebuild", help="after RapidRAW overwrites sidecars: keyframes back, re-blend, re-apply every correction").add_argument("folder", type=Path)
 
@@ -81,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     folder = args.folder.expanduser()
 
-    writes = args.command in ("deflicker", "keyframes", "refine", "undo", "restore", "rebuild") \
+    writes = args.command in ("deflicker", "keyframes", "refine", "undo", "restore", "rebuild", "white-balance") \
         or (args.command == "suggest-keyframes" and args.label)
     if writes and not getattr(args, "dry_run", False) and not getattr(args, "force", False) and rapidraw_running():
         print(RUNNING_MESSAGE, file=sys.stderr)
@@ -123,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
             print("  Looks good.")
         return 1 if any(p.serious for p in problems) else 0
 
+    if args.command == "white-balance":
+        return _white_balance(seq, args)
     if args.command == "rebuild":
         try:
             frames, keys = rebuild(seq)
@@ -225,6 +243,41 @@ def _keyframes(seq, args, problems) -> int:
     return 0
 
 
+def _white_balance(seq, args) -> int:
+    if args.undo:
+        print(f"  Put back the previous white balance on {undo_white_balance(seq)} frames. {CLOSE_FIRST}")
+        return 0
+    to = args.to
+    if to not in ("smooth", "first"):
+        try:
+            to = float(to)
+        except ValueError:
+            print('--to must be "smooth", "first" or a Kelvin number like 5600', file=sys.stderr)
+            return 1
+    try:
+        wb = plan_white_balance(seq, to, smoothness=args.smoothness, tint=args.tint)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    if np.isfinite(wb.as_shot).all():
+        print(f"  Camera's white balance: {np.nanmin(wb.as_shot):.0f}-{np.nanmax(wb.as_shot):.0f} K, "
+              f"jumping up to {wb.biggest_jump_before:.0f} K between frames.")
+    print(f"  New: {wb.kelvin.min():.0f}-{wb.kelvin.max():.0f} K, changing at most "
+          f"{wb.biggest_jump_after:.0f} K between frames. Tint {wb.tint:g}.")
+    if args.dry_run:
+        step = max(1, len(seq) // 8)
+        for i in range(0, len(seq), step):
+            shot = f"{wb.as_shot[i]:.0f} K" if np.isfinite(wb.as_shot[i]) else "unknown"
+            print(f"    {seq[i].name}: camera {shot} -> {wb.kelvin[i]:.0f} K")
+        print("  Dry run: nothing written.")
+        return 0
+    print(f"  Wrote white balance to {apply_white_balance(seq, wb)} frames. Your Temperature and Tint "
+          "sliders are left as they are, on top.")
+    print("  Undo with: timelapse-rapidraw white-balance FOLDER --undo")
+    print(f"  {CLOSE_FIRST}")
+    return 0
+
+
 def _refine(seq, args) -> int:
     wb = args.white_balance
     if wb not in ("auto", "smooth", "steady", "first"):
@@ -238,7 +291,7 @@ def _refine(seq, args) -> int:
         return 1
     try:
         result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run,
-                        colour=not args.no_colour, white_balance=wb)
+                        colour=args.colour, white_balance=wb)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1

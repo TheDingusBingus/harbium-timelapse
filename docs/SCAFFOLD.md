@@ -179,7 +179,11 @@ Decisions:
 ### 5.2d FINDING: Auto white balance is the remaining colour flicker
 After refine (render brightness 0.013), James still saw flicker (leaves, left side) and "sudden jumps in colour warmth". Render colour wobble **0.051** vs **0.021** in the RAW sensor warmth: 2.5× more colour flicker than the light had. Render colour jumps beyond the real light correlate **−0.93** with the camera's as-shot white balance (ExifTool `ColorTempAsShot`: 4845–7415 K, jumps up to 669 K between frames). Biggest jumps at the **hand-turned ND moves** (1634, 1644–45, 1659): a variable ND shifts colour as it turns and AWB re-guesses; the rest at late ISO steps. Brightness was fine; colour wasn't measured by refine at all.
 
-**RapidRAW has no absolute white balance in the sidecar** (James confirmed): Temperature is a nudge from each frame's as-shot WB, and paste copies the nudge, so every frame keeps its Auto starting point. Decision: **colour channel in `refine`**, the same closed loop as exposure, on the Temperature slider:
+**UPDATE — RapidRAW *does* store absolute white balance**, learned from two real sidecars: `"whiteBalance": {"temperature": 5600, "tint": 0}` (`null` = as shot). The relative `temperature`/`tint` sliders are separate fields and stayed 0. Paste only copies the relative sliders, which is why copying couldn't fix it; the tool writes the absolute field per frame.
+
+**`timelapse-rapidraw white-balance`** (the real fix): writes each frame's Kelvin directly. `--to smooth` (default; James's idea): the camera's as-shot Kelvin smoothed in mireds over `--smoothness` 50 frames. On the R6: biggest frame-to-frame change **669 K → 43 K**, journey 5250 → 7250 K kept. (76 frames: 37 K but flattens the ends; the final lamp-lit drop to ~5000 K only reaches ~5370.) `--to first` / Kelvin number for fixed. `--tint` default 0. Relative sliders untouched (keyframe grading stays on top). Ledger keeps `white_balance_before` for `--undo`; survives deflicker, full `undo`, `keyframes` re-blend and `rebuild`. `check` treats `whiteBalance` as per-frame like exposure. **Unverified:** RapidRAW applies the relative sliders on top of an absolute WB; and what tint the as-shot actually has (0 may shift green/magenta slightly).
+
+**First real attempt, the relative-slider colour loop, made it worse** (more obvious colour flicker after one pass): its first-pass estimate of the Temperature slider's effect was confounded by keyframe temperatures set in response to colour, or its guess was far off. It's now opt-in (`refine --colour`), experimental; `undo --colour` removes it while keeping exposure work. Original description below for the record. Decision was: **colour channel in `refine`**, the same closed loop as exposure, on the Temperature slider:
 - `--white-balance smooth` (**default when ExifTool gives as-shot Kelvin; James's idea**): target = render colour with the camera's as-shot mired replaced by a heavily smoothed curve of it (window max(3×window, n/3)). Removes only the camera's frame-to-frame guessing; keeps the auto look and real colour changes in the light (lamps coming on).
 - `steady`: target = smoothed render colour. Stronger; irons out real colour changes too. Default without Kelvin.
 - `first` / Kelvin number: as if every frame were shot at one white balance; keyframe looks shift.
@@ -251,7 +255,9 @@ Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimme
 - [ ] RapidRAW-running guard fires on Windows
 - [x] Refine passes bring it under 0.015 (0.136 → 0.022 → **0.013**)
 - [ ] Looks right at full speed: **not yet** (colour from Auto WB, leaf motion: §5.2d)
-- [ ] Colour refine on the real sequence: render colour wobble from 0.051 down near the light's own; no sudden warmth jumps by eye
+- [x] Colour refine (relative slider) on the real sequence: **made it worse**; now opt-in
+- [ ] `white-balance` on the real sequence: render colour wobble from 0.051 down near the light's own; no sudden warmth jumps by eye
+- [ ] Confirm relative Temperature/Tint still apply on top of an absolute white balance in RapidRAW
 - [ ] Cross-check learned Temperature strength against RapidRAW's Kelvin readout
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
@@ -262,6 +268,7 @@ Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimme
 - **RapidRAW EXIF fallback in the core?** Currently integration-only (core must not know RapidRAW). Fine while ExifTool remains the recommendation.
 - **Third-stop ISO puzzle (§4.4).** Worth a controlled test: same scene, ISO 100/125/160/200, locked everything else. Tells us whether Canon's in-between ISOs reach the RAW data.
 - **Measurement speed.** Real timing on careful mode still unreported; multi-core measurement is the obvious next speed-up.
+- **The tool's own white balance check per frame** (James): estimate each frame's white balance from the sensor colour (already measured) rather than trusting the camera's Auto guess, smooth that, write it. Independent of camera settings; harder to fool with a red coat or a turned ND.
 - **Smooth by time, not frame index?** Currently the x-axis is frame number. Across a missing frame or an interval change, capture time would be more truthful. Small change in `smooth_flicker`; decide after seeing real data.
 - **Region of interest.** Some sequences need deflicker measured on the landscape only, ignoring a moving sky. Possible `area=` parameter, photographer-named.
 - **Iterative passes.** If an editor's exposure isn't a pure linear gain, one pass may under-correct. The integration can re-render, re-measure, and repeat; the core needs nothing new for that.

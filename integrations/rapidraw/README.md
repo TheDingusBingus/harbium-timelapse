@@ -65,21 +65,26 @@ timelapse-rapidraw refine ~/Pictures/sunset ~/Pictures/sunset-export
 
 Usually one or two passes.
 
-Refine fixes **colour** too. If your camera was on Auto white balance, its
-guess jumps from frame to frame, and RapidRAW's Temperature slider is only a
-nudge from each frame's own guess, so pasting can't fix it. By default (with
-ExifTool installed), refine nudges each frame so its white balance follows a
-heavily smoothed curve of the camera's own: the jumps go, the auto look stays.
+## Auto white balance: steady colour
+
+On Auto white balance the camera re-guesses every frame, and the render's
+colour flickers. In RapidRAW, pasting only copies the *relative* Temperature
+and Tint sliders, which nudge each frame's own guess, so it can't fix this.
+This writes a steady white balance, in Kelvin, into every frame:
 
 ```bash
-timelapse-rapidraw refine ... --white-balance smooth   # default with ExifTool
-timelapse-rapidraw refine ... --white-balance steady   # smooth the render's colour itself
-timelapse-rapidraw refine ... --white-balance first    # first frame's white balance throughout
-timelapse-rapidraw refine ... --white-balance 5600     # a fixed Kelvin
-timelapse-rapidraw refine ... --no-colour              # exposure only
+timelapse-rapidraw white-balance ~/Pictures/sunset --dry-run      # see what it would do
+timelapse-rapidraw white-balance ~/Pictures/sunset                # camera's own Kelvin, smoothed
+timelapse-rapidraw white-balance ~/Pictures/sunset --smoothness 80  # calmer still
+timelapse-rapidraw white-balance ~/Pictures/sunset --to 5600      # or one fixed Kelvin
+timelapse-rapidraw white-balance ~/Pictures/sunset --undo
 ```
 
-Better still, next time set a fixed white balance in camera.
+The default keeps the camera's own judgement of the changing light, minus its
+frame-to-frame guessing: Auto white balance plus smoothing usually beats one
+fixed value over a day-to-night sequence. (For short sequences in steady
+light, a fixed white balance in camera is simpler.) Your Temperature and Tint
+sliders stay as they are, on top. Needs ExifTool for the as-shot values.
 
 ## If RapidRAW saves over your edits
 
