@@ -86,10 +86,13 @@ def suggest(seq: Sequence, every: float = 1.0, warmth_every: float = 0.5,
 class BlendResult:
     keyframes: list[str]
     changed: int
-    held: list[str] = field(default_factory=list)   # settings that couldn't blend
+    held: dict[str, str] = field(default_factory=dict)   # setting -> why it couldn't blend
 
 
-def plan_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> tuple[list[dict], list[int], list[str]]:
+_MISSING = object()  # a setting a keyframe's sidecar doesn't contain at all
+
+
+def plan_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> tuple[list[dict], list[int], dict[str, str]]:
     """Each frame's blended ``adjustments``, the keyframe positions, and the
     settings that had to be held rather than blended. Writes nothing."""
     keys = keyframes_in(seq, label)
@@ -107,9 +110,10 @@ def plan_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> tuple[list[dict], 
         set_exposure({"adjustments": adj}, get_exposure(data) - applied)  # your exposure, not deflicker's
         key_edits.append(adj)
 
-    held: set[str] = set()
-    per_frame = _blend(key_edits, keys, len(seq), "", held)
-    return per_frame, keys, sorted(held)
+    held: dict[str, str] = {}
+    names = [seq[i].name for i in keys]
+    per_frame = _blend(key_edits, keys, names, len(seq), "", held)
+    return per_frame, keys, dict(sorted(held.items()))
 
 
 def blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> BlendResult:
@@ -150,8 +154,18 @@ def frames_off_the_blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> list[tup
 
 # --- the blend itself -------------------------------------------------------
 
-def _blend(values: list, keys: list[int], n: int, path: str, held: set[str]) -> list:
-    """One value per frame, from one value per keyframe. Recursive."""
+def _blend(values: list, keys: list[int], names: list[str], n: int, path: str, held: dict) -> list:
+    """One value per frame, from one value per keyframe. Recursive.
+
+    Settings are blended one by one: a setting that can't blend, or that's
+    missing from some keyframes' sidecars, is held on its own and reported,
+    without stopping everything else from blending.
+    """
+    if any(v is _MISSING for v in values):
+        lacking = [name for name, v in zip(names, values) if v is _MISSING]
+        held[path] = "not set on " + ", ".join(lacking)
+        return _hold(values, keys, n)
+
     first = values[0]
     if all(_same(v, first) for v in values[1:]):
         return [copy.deepcopy(first) for _ in range(n)]
@@ -162,20 +176,29 @@ def _blend(values: list, keys: list[int], n: int, path: str, held: set[str]) -> 
             return [int(round(x)) for x in curve]
         return [_tidy(x) for x in curve]
 
-    if all(isinstance(v, dict) for v in values) and all(v.keys() == first.keys() for v in values):
-        columns = {k: _blend([v[k] for v in values], keys, n, f"{path}.{k}" if path else k, held)
-                   for k in first}
-        return [{k: columns[k][i] for k in first} for i in range(n)]
+    if all(isinstance(v, dict) for v in values):
+        order = list(max(values, key=len))                          # fullest keyframe's order,
+        order += [k for v in values for k in v if k not in order]   # then anything only others have
+        columns = {k: _blend([v.get(k, _MISSING) for v in values], keys, names, n,
+                             f"{path}.{k}" if path else k, held)
+                   for k in order}
+        return [{k: columns[k][i] for k in order if columns[k][i] is not _MISSING} for i in range(n)]
 
     if all(isinstance(v, list) for v in values) and len({len(v) for v in values}) == 1:
-        columns = [_blend([v[j] for v in values], keys, n, f"{path}[{j}]", held) for j in range(len(first))]
+        columns = [_blend([v[j] for v in values], keys, names, n, f"{path}[{j}]", held)
+                   for j in range(len(first))]
         return [[col[i] for col in columns] for i in range(n)]
 
-    held.add(path or "(everything)")
+    held[path or "(everything)"] = "can't be blended"
+    return _hold(values, keys, n)
+
+
+def _hold(values: list, keys: list[int], n: int) -> list:
+    """Each frame takes the value of the keyframe at or before it."""
     out = []
     for i in range(n):
         k = max((j for j, key in enumerate(keys) if key <= i), default=0)
-        out.append(copy.deepcopy(values[k]))
+        out.append(copy.deepcopy(values[k]) if values[k] is not _MISSING else _MISSING)
     return out
 
 

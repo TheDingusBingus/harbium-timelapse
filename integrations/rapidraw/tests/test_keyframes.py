@@ -107,7 +107,7 @@ def test_what_cant_blend_is_held_and_named(sunset_folder):
     edit(images[30], toneMapper="agx")
     edit(images[59], toneMapper="agx")
     result = blend(load(folder))
-    assert "toneMapper" in result.held
+    assert result.held == {"toneMapper": "can't be blended"}
     assert [adjustment(i, "toneMapper") for i in (images[0], images[29], images[30], images[45])] == \
         ["basic", "basic", "agx", "agx"]
 
@@ -168,3 +168,35 @@ def test_restore_puts_every_sidecar_back_byte_for_byte(sunset_folder):
     assert [sidecar_path(i).read_bytes() for i in images] != before
     restore(folder)
     assert [sidecar_path(i).read_bytes() for i in images] == before
+
+
+def test_a_keyframe_missing_settings_only_holds_those_settings(sunset_folder):
+    """Seen on real data: some sidecars carry only some settings, and one
+    mismatch used to hold the entire edit."""
+    folder, images = sunset_folder
+    data = read_sidecar(images[30])
+    for k in ("aiPatches", "chromaticAberrationBlueYellow", "dehaze"):
+        del data["adjustments"][k]
+    sidecar_path(images[30]).write_text(dump(data), encoding="utf-8")
+
+    result = blend(load(folder))
+    assert set(result.held) == {"aiPatches", "chromaticAberrationBlueYellow", "dehaze"}
+    assert all(why == f"not set on {images[30].name}" for why in result.held.values())
+    temps = [adjustment(i, "temperature") for i in images]
+    assert 0 < temps[15] < 25 and -30 < temps[45] < 25          # everything else still blends
+    assert "dehaze" not in read_sidecar(images[40])["adjustments"]  # governed by keyframe 30: left unset
+    assert "dehaze" in read_sidecar(images[10])["adjustments"]
+
+
+def test_non_keyframes_missing_settings_dont_matter(tmp_path):
+    """Sparse sidecars between keyframes are simply overwritten."""
+    images = make_sequence(tmp_path, 20)
+    for i in range(1, 19):
+        data = read_sidecar(images[i])
+        data["adjustments"] = {"exposure": 0, "contrast": 3}
+        sidecar_path(images[i]).write_text(dump(data), encoding="utf-8")
+    label_keyframes(load(tmp_path), [0, 19])
+    edit(images[19], contrast=40)
+    result = blend(load(tmp_path))
+    assert result.held == {}
+    assert len(read_sidecar(images[10])["adjustments"]) == len(read_sidecar(images[0])["adjustments"])

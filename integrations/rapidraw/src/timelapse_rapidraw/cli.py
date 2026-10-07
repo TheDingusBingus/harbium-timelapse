@@ -167,8 +167,7 @@ def _keyframes(seq, args, problems) -> int:
         if args.dry_run:
             per_frame, keys, held = plan_blend(seq)
             print(f"  Would blend between {len(keys)} keyframes: {', '.join(seq[i].name for i in keys)}")
-            if held:
-                print(f"  Can't blend, so held from keyframe to keyframe: {', '.join(held)}")
+            _report_held(held)
             print("  Dry run: nothing written.")
             return 0
         result = blend(seq)
@@ -177,11 +176,24 @@ def _keyframes(seq, args, problems) -> int:
         return 1
     print(f"  Blended between {len(result.keyframes)} keyframes: {', '.join(result.keyframes)}")
     print(f"  Updated {result.changed} frames.")
-    if result.held:
-        print(f"  Can't blend, so held from keyframe to keyframe: {', '.join(result.held)}")
+    _report_held(result.held)
     print("  Deflicker was reset by this. Next: timelapse-rapidraw deflicker FOLDER")
     print(f"  {CLOSE_FIRST}")
     return 0
+
+
+def _report_held(held: dict[str, str]) -> None:
+    """Group held settings by reason, so 40 missing settings read as one line."""
+    groups: dict[str, list[str]] = {}
+    for setting, why in held.items():
+        groups.setdefault(why, []).append(setting)
+    for why, settings in groups.items():
+        shown = ", ".join(settings[:6]) + (f" and {len(settings) - 6} more" if len(settings) > 6 else "")
+        if why.startswith("not set on"):
+            print(f"  {len(settings)} setting{'s' if len(settings) != 1 else ''} {why.replace('not set on', 'missing from the sidecar of')}, "
+                  f"so held rather than blended: {shown}")
+        else:
+            print(f"  Can't blend, so held from keyframe to keyframe: {shown}")
 
 
 def _export(folder: Path, output: Path, rapidraw: str | None, quality: int) -> int:
