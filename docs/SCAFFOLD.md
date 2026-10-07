@@ -102,6 +102,12 @@ Deflicker can't tell a deliberate exposure step from flicker. First version smea
 
 **Why the EXIF sizes aren't trusted** — first real sequence (R6, 229 CR3s, dusk, 2026-10-07): the f/22 frame measured −0.27 against a predicted −0.28, so measurement is sound; but third-stop ISO steps measured anywhere from 0.0 to +0.4, and across 1766–1807 the settings claim +3 stops while the pictures barely move. Cause unknown (simultaneous ND tweaks, the light falling, or Canon's third-stop ISO handling in RAW). Trusting EXIF sizes invented a −0.44 "ND step" and threw the f/22 frame's correction to +0.70. The settings say *where*; the pictures say *how much*.
 
+### 4.4a Keyframes: suggested from the light, blended for every setting
+- **Suggestions follow the real light**, not brightness jumps: brightness minus your exposure steps (§4.4), smoothed; a keyframe each ~1 stop of change or ~0.5 stop of colour shift, never closer than ~n/30 frames, first and last always. On the R6 sequence: 6 keyframes, bunching at the end where light falls fastest. Jumps are poor keyframes: they're your ND/ISO moves, the least representative frames.
+- **Colour ("warmth") = log2(red/blue).** For RAW in careful mode it's read from the sensor's red and blue photosites *before* white balance, because the R6 shot on Auto WB (`WhiteBalance: 0` in the sidecar EXIF) and its per-frame guesses would masquerade as the light changing. Fast mode uses the preview, after camera WB: less trustworthy for colour.
+- **Blending** (core `blend_between`): monotone cubic (Fritsch–Carlson), exact at keyframes, no overshoot, flat at first and last keyframe (ease in/out), no change of pace at middle keyframes. Holds outside the keyframe range.
+- **The tool suggests; you decide.** It only labels with `--label`. The keyframe edits are the creative part.
+
 ### 4.5 ExifTool first, exifread second
 **exifread cannot read CR3** (checked in its source: its ISO-BMFF parser only accepts heic/avif/mif1 brands). James's R6 shoots CR3. ExifTool reads everything, in one batch call per folder. If neither is available the sequence still loads and a Problem says how to fix it.
 
@@ -135,12 +141,23 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 - **Virtual copies are left alone.**
 - **Tell the user to close the folder in RapidRAW first.** It may save its in-memory edits over ours. Unverified whether it does; cheaper to warn than to find out on someone's sequence.
 
+### 5.2a Keyframes in RapidRAW — DECIDED
+- **Keyframe = purple colour label** (`tags` contains `color:purple`). One colour label per frame, so labelling replaces another colour (reported). **Unverified:** that RapidRAW offers purple and writes it as `color:purple`. Real sidecars showed `color:yellow` and `color:red`. Verify (§5.3).
+- **`keyframes` overwrites the whole `adjustments` block of every non-keyframe frame** with the blend (James's call: in-between edits are replaced). Never touches `rating`, `tags`, `exif`.
+- Per setting: same at all keyframes → copied exactly; numbers → blended (whole numbers stay whole); dicts with the same keys and lists of the same length → blended inside; anything else (booleans, `toneMapper`, differently shaped masks/curves) → **held** from each keyframe until the next, and named in the output.
+- **Blending resets deflicker:** keyframe exposure is read as *your* exposure (current minus the ledger's applied correction), the blended exposure is written, the ledger is cleared. Run deflicker again after. Deflicker then builds on the blended exposure.
+- **`check` is keyframe-aware:** with ≥2 keyframes it compares every frame with the blend (exposure aside); with 1 it says so; with none, the old "matches the rest" check, now also suggesting purple for a deliberate one-off.
+- **`restore`** copies every sidecar back from `originals/` and clears the ledger. Backups are taken at the first *edit* change (blend or deflicker), **not** at labelling: otherwise `restore` would roll keyframe grades back to before they were made. Restore leaves labels.
+
 ### 5.3 Still to verify on real data
 - [ ] `timelapse-rapidraw check` on a real CR3 folder
 - [ ] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed
 - [ ] Does RapidRAW, with the folder open, overwrite our values? (Decides whether the "close first" warning can go.)
 - [ ] `export` path: where the `rapidraw` command lives in the macOS/Windows install (pass `--rapidraw` until known)
 - [ ] Flicker in the exported render measurably lower than without deflicker
+- [ ] **Purple label round trip:** a frame labelled purple in RapidRAW is found by `keyframes --dry-run`, and a frame labelled by `suggest-keyframes --label` shows purple in RapidRAW
+- [ ] Blended in-between frames open in RapidRAW with sensible sliders; held settings behave
+- [ ] Sensor warmth on real CR3s: plausible warming then bluing through the sunset
 
 ## 6. Non-negotiables
 
@@ -166,11 +183,12 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 5. ✅ `measure.py` — rank-based, shared band
 6. ✅ `deflicker.py` — robust LOWESS
 7. ✅ `cli.py` — `check`, `deflicker --csv`
-8. ✅ Tests: 53 passing (one runs real ExifTool when installed), synthetic sequences with known truth plus cases taken from the real R6 sequence
+8. ✅ Tests: 63 core passing (one runs real ExifTool when installed), synthetic sequences with known truth plus cases taken from the real R6 sequence
 9. ⏳ **Real sequence** — run on an actual R6 CR3 timelapse (§8). *Nothing in the RAW path has touched a real file yet.*
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
-12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4). Manual "mark where the light changes" keyframes still to come if real use asks for it
+12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4)
+12a. ✅ Keyframes — core suggestions + blending; RapidRAW `suggest-keyframes`, `keyframes`, `restore`, keyframe-aware `check` (§4.4a, §5.2a). 63 core + 29 integration tests
 13. ⬜ Motion blur simulation
 
 ---

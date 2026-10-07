@@ -17,16 +17,44 @@ into each frame's exposure in RapidRAW's own sidecar files.
 timelapse-rapidraw check ~/Pictures/sunset
 timelapse-rapidraw deflicker ~/Pictures/sunset --dry-run   # see what would change
 timelapse-rapidraw deflicker ~/Pictures/sunset
-timelapse-rapidraw undo ~/Pictures/sunset                  # take it back out
+timelapse-rapidraw undo ~/Pictures/sunset                  # take deflicker back out
 timelapse-rapidraw export ~/Pictures/sunset ~/Pictures/sunset-render
+```
+
+## Day to night: keyframes
+
+When the look needs to change through the sequence (white balance, contrast,
+shadows), edit a few keyframes and let the rest be blended.
+
+```bash
+timelapse-rapidraw suggest-keyframes ~/Pictures/sunset --label   # labels them purple
+# in RapidRAW: edit each purple frame however you like, then close the folder
+timelapse-rapidraw keyframes ~/Pictures/sunset                   # blends every setting
+timelapse-rapidraw deflicker ~/Pictures/sunset                   # then deflicker on top
+```
+
+Keyframes are suggested where the light itself changes (about a stop dimmer,
+or noticeably warmer or bluer), not where you moved your exposure. Move, add
+or remove purple labels as you like: the suggestions are only a start.
+
+`keyframes` **replaces** the edit on every frame between keyframes. Settings
+that can't be blended (on/off switches, the tone mapper, masks shaped
+differently) are held from one keyframe to the next and listed. To put
+every sidecar back as it was before this tool changed it:
+
+```bash
+timelapse-rapidraw restore ~/Pictures/sunset
 ```
 
 Reopen the folder in RapidRAW to see the new exposures.
 
 ## What it will and won't touch
 
-- Only the **Exposure** slider of each frame. Every other setting, rating and tag
-  stays exactly as it was.
+- `deflicker` changes only the **Exposure** slider of each frame.
+- `keyframes` replaces the whole edit on frames between purple keyframes, and
+  nothing on the keyframes themselves.
+- Ratings and the EXIF copy are never changed. `suggest-keyframes --label`
+  changes colour labels, and says which it replaced.
 - Corrections are **added to** your exposure, not written over it. If you've
   ramped exposure by hand, that ramp is kept.
 - Run it again and the old correction is replaced, not stacked.

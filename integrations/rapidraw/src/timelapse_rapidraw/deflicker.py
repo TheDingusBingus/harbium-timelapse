@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,9 +32,7 @@ from .sidecar import (
     get_exposure, read_sidecar, set_exposure, sidecar_path,
     with_sidecar_settings, write_sidecar,
 )
-
-STATE_DIR = ".timelapse-core"
-LEDGER = "rapidraw.json"
+from .state import clear_ledger, keep_original, read_ledger, write_ledger
 _VIRTUAL_COPY = re.compile(r"\.[0-9a-f]{6}\.rrdata$")
 
 
@@ -98,8 +95,8 @@ def check(seq: Sequence) -> list[Problem]:
             serious=True,
         ))
 
-    if sidecars:
-        problems += _check_matching_edits(sidecars)
+    if sidecars and not missing and not broken:
+        problems += _check_edits(seq, sidecars)
 
     if any(_VIRTUAL_COPY.search(p.name) for p in seq.folder.iterdir()):
         problems.append(Problem(
@@ -107,6 +104,29 @@ def check(seq: Sequence) -> list[Problem]:
             "This folder has RapidRAW virtual copies. Only the main edit of each frame is changed.",
         ))
     return problems
+
+
+def _check_edits(seq: Sequence, sidecars: list[tuple[str, dict]]) -> list[Problem]:
+    """With two or more purple keyframes, every frame should match the blend
+    between them. Without, every frame should match the rest."""
+    from .keyframes import KEYFRAME_LABEL, frames_off_the_blend, keyframes_in
+
+    keys = keyframes_in(seq, KEYFRAME_LABEL)
+    if len(keys) == 1:
+        return [Problem("one_keyframe", f"{seq[keys[0]].name} is the only purple keyframe. "
+                        "Label at least one more (the first and last frames, say) to blend between them.")]
+    if len(keys) >= 2:
+        off = frames_off_the_blend(seq, KEYFRAME_LABEL)
+        if not off:
+            return []
+        first, differ = off[0]
+        return [Problem(
+            "off_the_blend",
+            f"{len(off)} frame{'s' if len(off) != 1 else ''} don't match the blend between your "
+            f"purple keyframes (first: {first}, {', '.join(differ[:3])}). "
+            "Run: timelapse-rapidraw keyframes FOLDER",
+        )]
+    return _check_matching_edits(sidecars)
 
 
 def _check_matching_edits(sidecars: list[tuple[str, dict]]) -> list[Problem]:
@@ -130,7 +150,8 @@ def _check_matching_edits(sidecars: list[tuple[str, dict]]) -> list[Problem]:
         problems.append(Problem(
             "different_edit",
             f"{name} has a different edit from the rest ({shown}). Deflicker evens out "
-            "brightness only, so this frame may still pop. Paste your settings onto it again.",
+            "brightness only, so this frame may still pop. Paste your settings onto it again, "
+            "or if it's meant to be a keyframe, label it purple.",
             frame=next(i for i, (n, _) in enumerate(sidecars) if n == name),
         ))
     return problems
@@ -148,7 +169,7 @@ def plan(
     blend: int | None = None,
 ) -> Plan:
     """Work out each frame's new exposure. Writes nothing."""
-    ledger = _read_ledger(seq.folder)
+    ledger = read_ledger(seq.folder)
     bases = np.array([_base(f, ledger) for f in seq])
     if raw_brightness is None:
         raw_brightness = measure_brightness(seq, speed=speed, progress=progress)
@@ -171,28 +192,23 @@ def apply(p: Plan) -> int:
             "Paste settings onto every frame in RapidRAW first."
         )
 
-    originals = p.folder / STATE_DIR / "originals"
-    originals.mkdir(parents=True, exist_ok=True)
-    ledger = _read_ledger(p.folder)
+    ledger = read_ledger(p.folder)
 
     for fp in p.frames:
-        side = sidecar_path(fp.frame.path)
-        backup = originals / side.name
-        if not backup.exists():
-            shutil.copy2(side, backup)
+        keep_original(fp.frame.path)
         data = read_sidecar(fp.frame.path)
         set_exposure(data, fp.exposure)
         write_sidecar(fp.frame.path, data)
         ledger[fp.frame.name] = {"base": round(fp.base, 4), "applied": round(fp.correction, 4)}
 
-    _write_ledger(p.folder, ledger)
+    write_ledger(p.folder, ledger)
     return len(p.frames)
 
 
 def undo(folder: Path | str) -> int:
     """Take every deflicker correction back out. Your own exposure stays."""
     folder = Path(folder)
-    ledger = _read_ledger(folder)
+    ledger = read_ledger(folder)
     changed = 0
     for name, entry in ledger.items():
         image = folder / name
@@ -202,7 +218,7 @@ def undo(folder: Path | str) -> int:
         set_exposure(data, get_exposure(data) - entry["applied"])
         write_sidecar(image, data)
         changed += 1
-    (folder / STATE_DIR / LEDGER).unlink(missing_ok=True)
+    clear_ledger(folder)
     return changed
 
 
@@ -214,19 +230,6 @@ def _base(frame: Frame, ledger: dict) -> float:
     data = _safe_read(frame.path)
     current = get_exposure(data) if data else 0.0
     return current - ledger.get(frame.name, {}).get("applied", 0.0)
-
-
-def _read_ledger(folder: Path) -> dict:
-    path = folder / STATE_DIR / LEDGER
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8")).get("frames", {})
-
-
-def _write_ledger(folder: Path, frames: dict) -> None:
-    path = folder / STATE_DIR / LEDGER
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "frames": frames}, indent=2), encoding="utf-8")
 
 
 def _safe_read(image: Path) -> dict | None:

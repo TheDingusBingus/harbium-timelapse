@@ -1,4 +1,8 @@
-"""``timelapse-rapidraw check | deflicker | undo | export``"""
+"""``timelapse-rapidraw``: check, suggest-keyframes, keyframes, deflicker,
+undo, restore, export.
+
+Order of work: check → suggest-keyframes → (edit purple keyframes in
+RapidRAW) → keyframes → deflicker → export."""
 
 from __future__ import annotations
 
@@ -12,7 +16,8 @@ from timelapse_core import load_sequence, measure_brightness, smooth_brightness
 from timelapse_core.cli import describe_changes
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
-from . import apply, check, load, plan, undo
+from . import apply, blend, check, label_keyframes, load, plan, restore, suggest, undo
+from .keyframes import plan_blend
 
 CLOSE_FIRST = ("Close this folder in RapidRAW before running, and reopen it after. "
                "RapidRAW may otherwise save its own copy over the new exposures.")
@@ -36,6 +41,19 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("undo", help="remove deflicker corrections").add_argument("folder", type=Path)
 
+    sk = sub.add_parser("suggest-keyframes", help="where keyframes belong, from how the light changes")
+    sk.add_argument("folder", type=Path)
+    sk.add_argument("--every", type=float, default=1.0, help="stops of light change between keyframes (default 1)")
+    sk.add_argument("--warmth-every", type=float, default=0.5, help="colour shift between keyframes (default 0.5)")
+    sk.add_argument("--fast", action="store_true", help="measure from embedded previews")
+    sk.add_argument("--label", action="store_true", help="label the suggested frames purple")
+
+    k = sub.add_parser("keyframes", help="blend every setting between purple keyframes, replacing in-between edits")
+    k.add_argument("folder", type=Path)
+    k.add_argument("--dry-run", action="store_true", help="show what would happen, write nothing")
+
+    sub.add_parser("restore", help="put every sidecar back as it was before this tool changed it").add_argument("folder", type=Path)
+
     e = sub.add_parser("export", help="render with RapidRAW, then measure the flicker left")
     e.add_argument("folder", type=Path)
     e.add_argument("output", type=Path)
@@ -47,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "undo":
         print(f"Removed deflicker from {undo(folder)} frames. {CLOSE_FIRST}")
+        return 0
+
+    if args.command == "restore":
+        print(f"Restored {restore(folder)} sidecars to how they were before this tool changed them. "
+              f"Purple labels are left as they are. {CLOSE_FIRST}")
         return 0
 
     if args.command == "export":
@@ -71,6 +94,11 @@ def main(argv: list[str] | None = None) -> int:
         if not problems:
             print("  Looks good.")
         return 1 if any(p.serious for p in problems) else 0
+
+    if args.command == "suggest-keyframes":
+        return _suggest(seq, args, problems)
+    if args.command == "keyframes":
+        return _keyframes(seq, args, problems)
     if any(p.serious for p in problems) and not args.dry_run:
         print("Not writing anything until the problems above are sorted.")
         return 1
@@ -98,6 +126,60 @@ def main(argv: list[str] | None = None) -> int:
         print("  Dry run: nothing written.")
         return 0
     print(f"  Updated {apply(p)} sidecars. Undo any time with: timelapse-rapidraw undo {folder}")
+    print(f"  {CLOSE_FIRST}")
+    return 0
+
+
+def _measuring(i, n):
+    print(f"\r  Measuring {i}/{n}", end="", file=sys.stderr, flush=True)
+    if i == n:
+        print(file=sys.stderr)
+
+
+def _suggest(seq, args, problems) -> int:
+    if any(p.serious for p in problems) and args.label:
+        print("Not labelling anything until the problems above are sorted.")
+        return 1
+    try:
+        picks = suggest(seq, every=args.every, warmth_every=args.warmth_every,
+                        speed="fast" if args.fast else "careful", progress=_measuring)
+    except ValueError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    print(f"  Suggested keyframes ({len(picks)}):")
+    for pick in picks:
+        print(f"    {seq[pick.frame].name}: {pick.reason}")
+    if args.label:
+        for note in label_keyframes(seq, [p.frame for p in picks]):
+            print(f"  {note}")
+        print(f"  Labelled purple. {CLOSE_FIRST}")
+        print("  Next: open RapidRAW, edit each purple keyframe, close the folder, then run keyframes.")
+    else:
+        print("  Add --label to label these purple, or label your own choice in RapidRAW.")
+    return 0
+
+
+def _keyframes(seq, args, problems) -> int:
+    if any(p.serious for p in problems):
+        print("Not blending until the problems above are sorted.")
+        return 1
+    try:
+        if args.dry_run:
+            per_frame, keys, held = plan_blend(seq)
+            print(f"  Would blend between {len(keys)} keyframes: {', '.join(seq[i].name for i in keys)}")
+            if held:
+                print(f"  Can't blend, so held from keyframe to keyframe: {', '.join(held)}")
+            print("  Dry run: nothing written.")
+            return 0
+        result = blend(seq)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"  Blended between {len(result.keyframes)} keyframes: {', '.join(result.keyframes)}")
+    print(f"  Updated {result.changed} frames.")
+    if result.held:
+        print(f"  Can't blend, so held from keyframe to keyframe: {', '.join(result.held)}")
+    print("  Deflicker was reset by this. Next: timelapse-rapidraw deflicker FOLDER")
     print(f"  {CLOSE_FIRST}")
     return 0
 

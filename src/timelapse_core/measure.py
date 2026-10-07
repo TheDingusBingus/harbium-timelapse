@@ -53,14 +53,31 @@ def measure_brightness(
     difference between frames: 0.1 apart means one frame is a tenth of a
     stop brighter than the other.
     """
+    return measure_light(frames, speed=speed, progress=progress)[0]
+
+
+def measure_light(
+    frames: Sequence | Iterable[Path | str],
+    speed: str = "careful",
+    progress: Progress | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Brightness and warmth of every frame.
+
+    Warmth is how red the light is compared with blue, in stops: higher is
+    warmer. Like brightness, only the differences between frames matter.
+    For RAW files in careful mode it's read from the sensor data itself,
+    before any white balance, so the camera's auto white balance changing its
+    mind from frame to frame doesn't get mistaken for the light changing.
+    """
     if speed not in ("careful", "fast"):
         raise ValueError('speed must be "careful" or "fast"')
     paths = [f.path for f in frames] if isinstance(frames, Sequence) else [Path(p) for p in frames]
 
     profiles = np.empty((len(paths), _PERCENTS.size))
+    warmth = np.empty(len(paths))
     for i, path in enumerate(paths):
         try:
-            image = load_linear(path, speed)
+            image, warmth[i] = _load(path, speed)
         except ImportError:
             raise
         except Exception as e:
@@ -68,7 +85,7 @@ def measure_brightness(
         profiles[i] = tone_profile(image)
         if progress:
             progress(i + 1, len(paths))
-    return brightness_from_profiles(profiles)
+    return brightness_from_profiles(profiles), warmth
 
 
 def brightness_of(linear_rgb: np.ndarray) -> float:
@@ -125,12 +142,29 @@ def brightness_from_profiles(profiles: np.ndarray) -> np.ndarray:
 
 def load_linear(path: Path, speed: str = "careful") -> np.ndarray:
     """Load a frame as small linear RGB, values 0–1."""
+    return _load(Path(path), speed)[0]
+
+
+def warmth_of(linear_rgb: np.ndarray) -> float:
+    """Red over blue, in stops, of a linear RGB image. Higher is warmer."""
+    img = np.asarray(linear_rgb, dtype=np.float64)
+    if img.ndim != 3:
+        return 0.0
+    ok = (img.max(axis=-1) < CLIPPED) & (img.min(axis=-1) > BLACK)
+    if ok.sum() < 100:
+        ok = np.ones(img.shape[:2], dtype=bool)
+    red, blue = img[..., 0][ok].mean(), img[..., 2][ok].mean()
+    return float(np.log2(red / blue)) if red > 0 and blue > 0 else 0.0
+
+
+def _load(path: Path, speed: str) -> tuple[np.ndarray, float]:
     if path.suffix.lower() in RAW_EXTENSIONS:
         return _load_raw(path, speed)
-    return _load_image(Image.open(path))
+    rgb = _load_image(Image.open(path))
+    return rgb, warmth_of(rgb)
 
 
-def _load_raw(path: Path, speed: str) -> np.ndarray:
+def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:
     try:
         import rawpy
     except ImportError as e:
@@ -144,11 +178,15 @@ def _load_raw(path: Path, speed: str) -> np.ndarray:
                 thumb = raw.extract_thumb()
             except (rawpy.LibRawNoThumbnailError, rawpy.LibRawUnsupportedThumbnailError):
                 thumb = None
+            rgb = None
             if thumb is not None and thumb.format == rawpy.ThumbFormat.JPEG:
-                return _load_image(Image.open(BytesIO(thumb.data)))
-            if thumb is not None and thumb.format == rawpy.ThumbFormat.BITMAP:
-                return _srgb_to_linear(_shrink(thumb.data) / 255.0)
+                rgb = _load_image(Image.open(BytesIO(thumb.data)))
+            elif thumb is not None and thumb.format == rawpy.ThumbFormat.BITMAP:
+                rgb = _srgb_to_linear(_shrink(thumb.data) / 255.0)
+            if rgb is not None:
+                return rgb, warmth_of(rgb)  # fast: preview colour, after the camera's white balance
 
+        warmth = _sensor_warmth(raw)
         rgb = raw.postprocess(
             half_size=True,
             gamma=(1, 1),
@@ -158,7 +196,31 @@ def _load_raw(path: Path, speed: str) -> np.ndarray:
             output_color=rawpy.ColorSpace.sRGB,
             user_flip=0,
         )
-    return _shrink(rgb) / 65535.0
+    return _shrink(rgb) / 65535.0, warmth
+
+
+def _sensor_warmth(raw) -> float:
+    """Red over blue straight from the sensor's red and blue photosites,
+    before white balance. Unclipped pixels only."""
+    img = raw.raw_image_visible
+    colours = raw.raw_colors_visible
+    black = raw.black_level_per_channel
+    white = raw.white_level * CLIPPED
+    step = 2 * max(1, max(img.shape) // (2 * LONG_EDGE))  # even, so the colour pattern survives
+    means = {}
+    for dy in (0, 1):
+        for dx in (0, 1):
+            colour = int(colours[dy, dx])
+            if colour not in (0, 2):  # 0 red, 2 blue
+                continue
+            values = img[dy::step, dx::step].astype(np.float64)
+            values = values[values < white] - black[colour]
+            values = values[values > 0]
+            if values.size:
+                means[colour] = values.mean()
+    if 0 in means and 2 in means:
+        return float(np.log2(means[0] / means[2]))
+    return 0.0
 
 
 def _load_image(img: Image.Image) -> np.ndarray:

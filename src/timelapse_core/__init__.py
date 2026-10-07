@@ -10,7 +10,8 @@
 """
 
 from .deflicker import smooth_brightness, smooth_flicker
-from .measure import measure_brightness
+from .keyframes import KeyframeSuggestion, blend_between, suggest_keyframes
+from .measure import measure_brightness, measure_light
 from .sequencer import check_sequence, format_stops, load_sequence
 from .ramping import find_exposure_changes
 from .types import ExposureChange, FlickerCorrections, Frame, Problem, Sequence
@@ -18,7 +19,8 @@ from .types import ExposureChange, FlickerCorrections, Frame, Problem, Sequence
 __version__ = "0.1.0"
 
 __all__ = [
-    "load_sequence", "check_sequence", "measure_brightness",
+    "load_sequence", "check_sequence", "measure_brightness", "measure_light",
+    "suggest_keyframes", "blend_between", "KeyframeSuggestion",
     "smooth_flicker", "smooth_brightness", "find_exposure_changes", "format_stops",
     "Frame", "Sequence", "Problem", "FlickerCorrections", "ExposureChange",
 ]

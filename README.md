@@ -11,6 +11,7 @@ It's early. Deflicker works, handles the exposure changes you make while shootin
 - **Checks a sequence** before you process it: missing frames, mixed RAW+JPEG folders, exposure setting changes, unreadable files. In sentences, not error codes.
 - **Measures brightness** of every frame, in stops, from the RAW data itself.
 - **Works out deflicker corrections**: how much to brighten or darken each frame so the light follows its real arc without the shimmer.
+- **Suggests keyframes** where the light itself changes, in brightness or colour, and blends values smoothly between them.
 - **Smooths out your own exposure changes.** ISO steps, shutter changes, and hand-turned ND filters (found from the pictures, since an ND leaves no trace in the file) are blended into one gentle ramp instead of jolts.
 
 It never touches your original files.
@@ -62,7 +63,6 @@ If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-ra
 
 ## Plans
 
-- Marking where the light changes by hand, for sequences where automatic isn't enough
 - Faster measuring, using every CPU core
 - Motion blur between frames
 
