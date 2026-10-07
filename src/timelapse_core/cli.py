@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     rend.add_argument("--fps", type=float, default=24, help="frames per second (default 24)")
     rend.add_argument("--width", type=int, default=None, help="scale to this width, e.g. 3840 (default: native)")
     rend.add_argument("--out", type=Path, default=None, help="video file to write (default: beside the folder)")
+    rend.add_argument("--blend-frames", type=int, default=1,
+                      help="mix each frame with its neighbours, 2 or 3, to calm moving leaves (default 1: off)")
 
     args = parser.parse_args(argv)
 
@@ -102,7 +104,8 @@ def _render(args) -> int:
             print(file=sys.stderr)
 
     try:
-        video = render_video(args.folder.expanduser(), args.out, fps=args.fps, width=args.width, progress=progress)
+        video = render_video(args.folder.expanduser(), args.out, fps=args.fps, width=args.width,
+                             progress=progress, blend_frames=args.blend_frames)
     except (RuntimeError, ValueError) as e:
         print(e, file=sys.stderr)
         return 1

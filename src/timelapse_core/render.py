@@ -31,6 +31,7 @@ def render_video(
     width: int | None = None,
     quality: int = 16,
     progress: Callable[[int, int], None] | None = None,
+    blend_frames: int = 1,
 ) -> Path:
     """Render every JPEG, PNG or TIFF in ``folder`` to an MP4, in name order.
 
@@ -39,6 +40,9 @@ def render_video(
       Very large videos may stutter in some players; VLC copes best.
     - ``quality``: 0 is lossless, 16 is visually lossless, 23 is ffmpeg's
       default. Lower is better and bigger.
+    - ``blend_frames``: mix each frame with its neighbours (2 or 3), the
+      timelapse equivalent of a longer shutter. Calms shimmer from things
+      that move between frames, like leaves in wind. 1 = off.
 
     Returns the path of the video.
     """
@@ -60,7 +64,11 @@ def render_video(
         raise ValueError(f"{folder} mixes image types. Render one type at a time.")
 
     output = Path(output) if output else folder.parent / f"{folder.name}.mp4"
+    if not 1 <= blend_frames <= 5:
+        raise ValueError("blend_frames should be between 1 (off) and 5")
     scale = f"scale={width}:-2" if width else "scale=trunc(iw/2)*2:trunc(ih/2)*2"  # H.264 needs even sizes
+    if blend_frames > 1:
+        scale = f"tmix=frames={blend_frames}," + scale
     command = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-f", "image2pipe", "-framerate", str(fps), "-c:v", kinds.pop(), "-i", "-",

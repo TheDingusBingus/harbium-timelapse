@@ -47,3 +47,12 @@ def test_width_scales_keeping_shape(tmp_path):
 def test_no_frames_says_so(tmp_path):
     with pytest.raises(ValueError, match="No JPEG"):
         render_video(tmp_path)
+
+
+def test_frame_blending_keeps_every_frame(tmp_path):
+    folder = tmp_path / "frames"
+    folder.mkdir()
+    make_folder(folder, [0.0, 1.0] * 12, fmt="jpg")                  # worst case: alternating
+    assert probe(render_video(folder, tmp_path / "b.mp4", fps=24, blend_frames=3))[2:] == ("24/1", 24)
+    with pytest.raises(ValueError):
+        render_video(folder, tmp_path / "x.mp4", blend_frames=9)

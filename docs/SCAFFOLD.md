@@ -176,6 +176,13 @@ Decisions:
 - **The real damage was 2 frames, not 229:** `check` showed 227 sidecars still matching the ledger; only the frames clicked in RapidRAW were reset. The thumbnails misled. `check`'s note for a few mismatches no longer assumes the change was the user's.
 - **Still to do:** tell a deliberate exposure tweak from a RapidRAW reset per frame (compare the rest of the edit with the originals and the blend), so a single reset frame is flagged as serious.
 
+### 5.2d FINDING: Auto white balance is the remaining colour flicker
+After refine (render brightness 0.013), James still saw flicker (leaves, left side) and "sudden jumps in colour warmth". Render colour wobble **0.051** vs **0.021** in the RAW sensor warmth: 2.5× more colour flicker than the light had. Render colour jumps beyond the real light correlate **−0.93** with the camera's as-shot white balance (ExifTool `ColorTempAsShot`: 4845–7415 K, jumps up to 669 K between frames). Biggest jumps at the **hand-turned ND moves** (1634, 1644–45, 1659): a variable ND shifts colour as it turns and AWB re-guesses; the rest at late ISO steps. Brightness was fine; colour wasn't measured by refine at all.
+
+Plan (pending one RapidRAW sidecar with a fixed WB set, to learn the `whiteBalance` schema): **lock white balance** across all frames, keyframe temperature offsets blended on top. Fallback if RapidRAW has no fixed WB: colour refine (temperature slider corrected against render warmth, closed loop like exposure).
+
+Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimmer, not exposure. `timelapse render --blend-frames 2|3` (ffmpeg `tmix`) blends neighbours; on random 0.15-stop jitter it cut wobble 0.114 → 0.034. That's the brief's "motion blur simulation" in its simplest form.
+
 ### 5.3 Still to verify on real data
 - [x] `timelapse-rapidraw check` on a real CR3 folder
 - [x] `deflicker` then reopen in RapidRAW: values appear on the sliders, nothing else changed (229 frames, 0.111 → 0.008 stops)
@@ -236,7 +243,9 @@ Decisions:
 - [x] Refine pass 1 on the real render: 0.136 → **0.022** stops
 - [ ] `rebuild` restores the real sequence after the RapidRAW overwrite (§5.2c)
 - [ ] RapidRAW-running guard fires on Windows
-- [ ] Refine passes bring it under 0.015, and it looks right at full speed
+- [x] Refine passes bring it under 0.015 (0.136 → 0.022 → **0.013**)
+- [ ] Looks right at full speed: **not yet** (colour from Auto WB, leaf motion: §5.2d)
+- [ ] White balance locked: render colour wobble close to the RAW's 0.021
 - [ ] Careful vs fast compared on the same sequence; difference recorded here
 
 ---
