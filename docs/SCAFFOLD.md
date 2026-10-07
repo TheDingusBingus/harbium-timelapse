@@ -172,7 +172,9 @@ Decisions:
 - **`check` detects overwrites:** frames whose exposure ≠ the ledger's base + applied. ≥ max(3, n/10) → serious `overwritten`, pointing to `rebuild`; fewer → a note (your deliberate tweak, kept next deflicker). `deflicker` and `refine` refuse to build on overwritten sidecars.
 - **`rebuild`**: originals back (current labels kept), ledger set aside, re-blend between keyframes, every ledger correction re-applied, ledger and refine history restored. Tested: a graded, keyframed, deflickered, refined sequence overwritten with defaults comes back setting-for-setting.
 - Found while building: `rebuild` must set the ledger aside before blending, or the blend subtracts deflicker from keyframe originals that never had it.
-- **Unverified:** the RapidRAW process name on Windows contains "rapidraw". Test: run any writing command with RapidRAW open; it must refuse.
+- **Guard bug found on first Windows run:** matching "rapidraw" anywhere caught this tool's own `timelapse-rapidraw.exe`, so it always refused. Now matches names *starting* with "rapidraw".
+- **The real damage was 2 frames, not 229:** `check` showed 227 sidecars still matching the ledger; only the frames clicked in RapidRAW were reset. The thumbnails misled. `check`'s note for a few mismatches no longer assumes the change was the user's.
+- **Still to do:** tell a deliberate exposure tweak from a RapidRAW reset per frame (compare the rest of the edit with the originals and the blend), so a single reset frame is flagged as serious.
 
 ### 5.3 Still to verify on real data
 - [x] `timelapse-rapidraw check` on a real CR3 folder

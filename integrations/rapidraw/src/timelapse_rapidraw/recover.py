@@ -33,17 +33,28 @@ from .state import STATE_DIR, clear_ledger, read_ledger, write_ledger
 # --- is RapidRAW running? -----------------------------------------------------
 
 def rapidraw_running() -> bool:
-    """True if a RapidRAW process is running. If it can't tell, says no."""
+    """True if RapidRAW itself is running. If it can't tell, says no.
+
+    Matches process names that *start* with "rapidraw" (RapidRAW.exe), so this
+    tool's own command, timelapse-rapidraw.exe, isn't mistaken for it. (It
+    was, on the first real run on Windows.)
+    """
     try:
         if sys.platform.startswith("win"):
             out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
                                  text=True, timeout=10).stdout
+            names = [line.split('","')[0].strip('"') for line in out.splitlines() if line.strip()]
         else:
             out = subprocess.run(["ps", "-A", "-o", "comm="], capture_output=True,
                                  text=True, timeout=10).stdout
+            names = [Path(line.strip()).name for line in out.splitlines() if line.strip()]
     except (OSError, subprocess.SubprocessError):
         return False
-    return "rapidraw" in out.lower()
+    return any(is_rapidraw(name) for name in names)
+
+
+def is_rapidraw(process_name: str) -> bool:
+    return process_name.lower().startswith("rapidraw")
 
 
 RUNNING_MESSAGE = (

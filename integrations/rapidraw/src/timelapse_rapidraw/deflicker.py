@@ -112,8 +112,9 @@ def check(seq: Sequence) -> list[Problem]:
         elif off:
             problems.append(Problem(
                 "exposure_changed",
-                f"{len(off)} frame{'s' if len(off) != 1 else ''} had exposure changed since this tool "
-                f"last wrote it (first: {off[0]}). Your change will be kept next time deflicker runs.",
+                f"{len(off)} frame{'s' if len(off) != 1 else ''}' exposure no longer matches what this tool "
+                f"last wrote (first: {off[0]}). If you changed it yourself in RapidRAW, it'll be kept next "
+                "time deflicker runs. If RapidRAW reset the edit, run: timelapse-rapidraw rebuild FOLDER",
             ))
 
     if any(_VIRTUAL_COPY.search(p.name) for p in seq.folder.iterdir()):

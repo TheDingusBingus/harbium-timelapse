@@ -91,3 +91,23 @@ def test_writing_commands_refuse_while_rapidraw_runs(tmp_path, monkeypatch, caps
         assert "RapidRAW is running" in capsys.readouterr().err
     assert cli.main(["check", str(tmp_path)]) in (0, 1)            # reading is always fine
     assert "RapidRAW is running" not in capsys.readouterr().err
+
+
+def test_the_guard_doesnt_mistake_this_tool_for_rapidraw():
+    from timelapse_rapidraw.recover import is_rapidraw
+    assert is_rapidraw("RapidRAW.exe")
+    assert is_rapidraw("rapidraw")
+    assert not is_rapidraw("timelapse-rapidraw.exe")   # this tool's own command on Windows
+    assert not is_rapidraw("python.exe")
+
+
+def test_rebuild_also_mends_just_a_couple_of_reset_frames(graded_and_refined):
+    """What really happened: only the frames clicked in RapidRAW were reset."""
+    folder, images, before = graded_and_refined
+    rapidraw_saves_defaults([images[0], images[30]])
+    assert "exposure_changed" in [p.kind for p in check(load(folder))]
+    rebuild(load(folder))
+    for image in (images[0], images[30]):
+        assert read_sidecar(image)["adjustments"]["toneMapper"] == "agx"
+        assert read_sidecar(image)["adjustments"]["exposure"] == pytest.approx(before[image.name]["exposure"], abs=2e-4)
+    assert [p.kind for p in check(load(folder))] == []
