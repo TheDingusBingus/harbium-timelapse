@@ -32,8 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     flick.add_argument("--csv", type=Path, help="save per-frame results to a CSV file")
 
     args = parser.parse_args(argv)
+
+    def reading(i: int, n: int) -> None:
+        print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
+        if i == n:
+            print(file=sys.stderr)
+
+    print(f"Looking in {args.folder}", file=sys.stderr, flush=True)
     try:
-        seq = load_sequence(args.folder.expanduser())
+        seq = load_sequence(args.folder.expanduser(), progress=reading)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1

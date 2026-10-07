@@ -59,9 +59,9 @@ class Plan:
 
 # --- load and check ---------------------------------------------------------
 
-def load(folder: Path | str) -> Sequence:
+def load(folder: Path | str, progress=None) -> Sequence:
     """Load like the core, then fill gaps from RapidRAW's EXIF copies."""
-    seq = load_sequence(folder)
+    seq = load_sequence(folder, progress=progress)
     frames = [with_sidecar_settings(f, _safe_read(f.path)) for f in seq]
     if all(f.taken_at for f in frames):
         frames.sort(key=lambda f: (f.taken_at, f.name))

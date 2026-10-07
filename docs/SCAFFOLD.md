@@ -99,6 +99,9 @@ Deflicker can't tell a planned shutter change from flicker. It would smooth a de
 ### 4.5 ExifTool first, exifread second
 **exifread cannot read CR3** (checked in its source: its ISO-BMFF parser only accepts heic/avif/mif1 brands). James's R6 shoots CR3. ExifTool reads everything, in one batch call per folder. If neither is available the sequence still loads and a Problem says how to fix it.
 
+### 4.5a ExifTool is fed through an argument file, in batches of 100
+First real run (Windows, 2026-10-07) hung inside the ExifTool call: every path on one command line, from an external drive with long folder names. Now: UTF-8 argument file (`-@`), `-charset filename=utf8`, `stdin=DEVNULL` so it can never wait for a keypress, 300s timeout per batch, progress after each batch. Results are matched back by normalised path (`normcase(abspath())`), because ExifTool on Windows reports paths with forward slashes. Tested with 250 files in a long, spaced, accented folder name.
+
 ### 4.6 Capture-time ordering
 Frames are ordered by capture time when every frame has one. This survives Canon's counter rolling 9999 → 0001 mid-sequence. macOS `._` AppleDouble files are skipped.
 
@@ -157,7 +160,7 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 5. ✅ `measure.py` — rank-based, shared band
 6. ✅ `deflicker.py` — robust LOWESS
 7. ✅ `cli.py` — `check`, `deflicker --csv`
-8. ✅ Tests: 25 passing, synthetic sequences with known truth
+8. ✅ Tests: 26 passing (one runs real ExifTool when installed), synthetic sequences with known truth
 9. ⏳ **Real sequence** — run on an actual R6 CR3 timelapse (§8). *Nothing in the RAW path has touched a real file yet.*
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)

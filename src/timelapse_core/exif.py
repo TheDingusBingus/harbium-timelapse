@@ -13,14 +13,20 @@ never the core's. The core never modifies an original file.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
+import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from .types import Frame
+
+Progress = Callable[[int, int], None]
 
 _EXIFTOOL_TAGS = [
     "-ExposureTime", "-FNumber", "-ISO", "-DateTimeOriginal",
@@ -32,13 +38,13 @@ def exiftool_available() -> bool:
     return shutil.which("exiftool") is not None
 
 
-def read_frames(paths: list[Path]) -> list[Frame]:
+def read_frames(paths: list[Path], progress: Progress | None = None) -> list[Frame]:
     """Read settings for many files at once. Same order as ``paths``."""
     paths = [Path(p) for p in paths]
-    found: dict[Path, Frame] = {}
+    found: dict[str, Frame] = {}
     if paths and exiftool_available():
-        found = _read_with_exiftool(paths)
-    return [found.get(p) or _read_with_exifread(p) for p in paths]
+        found = _read_with_exiftool(paths, progress)
+    return [found.get(_key(p)) or _read_with_exifread(p) for p in paths]
 
 
 def read_frame(path: Path | str) -> Frame:
@@ -47,31 +53,64 @@ def read_frame(path: Path | str) -> Frame:
 
 # --- ExifTool ---------------------------------------------------------------
 
-def _read_with_exiftool(paths: list[Path]) -> dict[Path, Frame]:
-    try:
-        out = subprocess.run(
-            ["exiftool", "-json", "-n", *_EXIFTOOL_TAGS, *map(str, paths)],
-            capture_output=True, text=True, timeout=600, check=False,
-        )
-        records = json.loads(out.stdout or "[]")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return {}
+BATCH = 100        # files per ExifTool call
+BATCH_TIMEOUT = 300  # seconds; a slow external drive can need a while
 
-    by_name = {str(p): p for p in paths}
-    frames: dict[Path, Frame] = {}
-    for rec in records:
-        path = by_name.get(rec.get("SourceFile", ""))
-        if path is None:
-            continue
-        frames[path] = Frame(
-            path=path,
-            taken_at=_parse_time(rec.get("DateTimeOriginal"), rec.get("SubSecTimeOriginal")),
-            shutter=_positive(rec.get("ExposureTime")),
-            aperture=_positive(rec.get("FNumber")),
-            iso=_positive(rec.get("ISO")),
-            camera=_text(rec.get("Model")),
+
+def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[str, Frame]:
+    """File names go to ExifTool through an argument file, in batches.
+
+    Putting hundreds of long paths on one command line fails on Windows in
+    ways that can hang rather than error. An argument file is ExifTool's own
+    recommended route, and it also carries non-English characters in folder
+    names safely (UTF-8 both ways).
+    """
+    frames: dict[str, Frame] = {}
+    for start in range(0, len(paths), BATCH):
+        batch = paths[start:start + BATCH]
+        for rec in _exiftool_batch(batch):
+            source = rec.get("SourceFile")
+            if not source:
+                continue
+            path = Path(source)
+            frames[_key(path)] = Frame(
+                path=path,
+                taken_at=_parse_time(rec.get("DateTimeOriginal"), rec.get("SubSecTimeOriginal")),
+                shutter=_positive(rec.get("ExposureTime")),
+                aperture=_positive(rec.get("FNumber")),
+                iso=_positive(rec.get("ISO")),
+                camera=_text(rec.get("Model")),
+            )
+        if progress:
+            progress(min(start + BATCH, len(paths)), len(paths))
+    # Keep the caller's own Path objects, not ExifTool's spelling of them.
+    by_key = {_key(p): p for p in paths}
+    return {k: dataclasses.replace(f, path=by_key[k]) for k, f in frames.items() if k in by_key}
+
+
+def _exiftool_batch(batch: list[Path]) -> list[dict]:
+    argfile = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".args", encoding="utf-8", delete=False) as f:
+            f.write("\n".join(["-charset", "filename=utf8", *map(str, batch)]))
+            argfile = f.name
+        out = subprocess.run(
+            ["exiftool", "-json", "-n", *_EXIFTOOL_TAGS, "-@", argfile],
+            capture_output=True, encoding="utf-8", errors="replace",
+            stdin=subprocess.DEVNULL,  # never let ExifTool sit waiting for a keypress
+            timeout=BATCH_TIMEOUT, check=False,
         )
-    return frames
+        return json.loads(out.stdout or "[]")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+    finally:
+        if argfile:
+            Path(argfile).unlink(missing_ok=True)
+
+
+def _key(path: Path | str) -> str:
+    """Same file, same key, whichever way the slashes face or letters are cased."""
+    return os.path.normcase(os.path.abspath(str(path)))
 
 
 # --- exifread ---------------------------------------------------------------

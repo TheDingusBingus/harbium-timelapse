@@ -49,8 +49,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "export":
         return _export(folder, args.output.expanduser(), args.rapidraw, args.quality)
 
+    def reading(i, n):
+        print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
+        if i == n:
+            print(file=sys.stderr)
+
+    print(f"Looking in {folder}", file=sys.stderr, flush=True)
     try:
-        seq = load(folder)
+        seq = load(folder, progress=reading)
     except ValueError as err:
         print(err, file=sys.stderr)
         return 1

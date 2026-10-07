@@ -21,7 +21,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".tif", ".tiff", ".png"}
 SUPPORTED = RAW_EXTENSIONS | IMAGE_EXTENSIONS
 
 
-def load_sequence(folder: Path | str) -> Sequence:
+def load_sequence(folder: Path | str, progress=None) -> Sequence:
     """Find every photo in ``folder`` and put them in shooting order.
 
     Ordered by capture time where every frame has one, which survives the
@@ -30,6 +30,8 @@ def load_sequence(folder: Path | str) -> Sequence:
 
     Hidden files are skipped, including the ``._IMG_0001.CR2`` copies macOS
     leaves on external drives.
+
+    ``progress(done, total)`` is called as camera settings are read.
     """
     folder = Path(folder)
     if not folder.is_dir():
@@ -42,7 +44,7 @@ def load_sequence(folder: Path | str) -> Sequence:
     if not paths:
         raise ValueError(f"No photos found in {folder}")
 
-    frames = read_frames(sorted(paths, key=_natural_key))
+    frames = read_frames(sorted(paths, key=_natural_key), progress=progress)
     if all(f.taken_at for f in frames):
         frames.sort(key=lambda f: (f.taken_at, _natural_key(f.path)))
     return Sequence(folder=folder, frames=tuple(frames))
