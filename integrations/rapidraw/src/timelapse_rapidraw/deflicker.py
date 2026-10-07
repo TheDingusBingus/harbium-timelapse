@@ -77,7 +77,10 @@ def check(seq: Sequence) -> list[Problem]:
         except (json.JSONDecodeError, UnicodeDecodeError):
             broken.append(f.name)
             continue
-        (sidecars.append(data) if data is not None else missing.append(f.name))
+        if data is None:
+            missing.append(f.name)
+        else:
+            sidecars.append((f.name, data))
 
     if missing:
         problems.append(Problem(
@@ -96,25 +99,39 @@ def check(seq: Sequence) -> list[Problem]:
         ))
 
     if sidecars:
-        def look(d):
-            adj = dict(d.get("adjustments") or {})
-            adj.pop("exposure", None)
-            return json.dumps(adj, sort_keys=True)
-        looks = [look(d) for d in sidecars]
-        common = max(set(looks), key=looks.count)
-        differ = sum(1 for x in looks if x != common)
-        if differ:
-            problems.append(Problem(
-                "different_edits",
-                f"{differ} frame{'s have' if differ != 1 else ' has'} different edits from the rest "
-                "(beyond exposure). Deflicker evens out brightness only; mismatched edits "
-                "can still flicker.",
-            ))
+        problems += _check_matching_edits(sidecars)
 
     if any(_VIRTUAL_COPY.search(p.name) for p in seq.folder.iterdir()):
         problems.append(Problem(
             "virtual_copies",
             "This folder has RapidRAW virtual copies. Only the main edit of each frame is changed.",
+        ))
+    return problems
+
+
+def _check_matching_edits(sidecars: list[tuple[str, dict]]) -> list[Problem]:
+    """Name every frame whose edit differs from the rest, and say what differs."""
+    def look(d: dict) -> dict:
+        adj = dict(d.get("adjustments") or {})
+        adj.pop("exposure", None)
+        return adj
+
+    looks = [(name, look(d)) for name, d in sidecars]
+    keys = [json.dumps(adj, sort_keys=True) for _, adj in looks]
+    common_key = max(set(keys), key=keys.count)
+    common = json.loads(common_key)
+
+    problems = []
+    for (name, adj), key in zip(looks, keys):
+        if key == common_key:
+            continue
+        differ = sorted(k for k in set(adj) | set(common) if adj.get(k) != common.get(k))
+        shown = ", ".join(differ[:4]) + (f" and {len(differ) - 4} more" if len(differ) > 4 else "")
+        problems.append(Problem(
+            "different_edit",
+            f"{name} has a different edit from the rest ({shown}). Deflicker evens out "
+            "brightness only, so this frame may still pop. Paste your settings onto it again.",
+            frame=next(i for i, (n, _) in enumerate(sidecars) if n == name),
         ))
     return problems
 

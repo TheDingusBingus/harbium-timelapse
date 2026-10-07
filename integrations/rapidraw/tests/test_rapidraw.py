@@ -164,7 +164,9 @@ def test_mismatched_edits_are_noted(tmp_path):
     data = read_sidecar(images[4])
     data["adjustments"]["contrast"] = 20
     sidecar_path(images[4]).write_text(dump(data), encoding="utf-8")
-    assert "different_edits" in [p.kind for p in check(load(tmp_path))]
+    (problem,) = [p for p in check(load(tmp_path)) if p.kind == "different_edit"]
+    assert images[4].name in problem.message
+    assert "contrast" in problem.message
 
 
 def test_virtual_copies_are_noted_and_left_alone(tmp_path):
