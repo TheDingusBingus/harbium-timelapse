@@ -18,7 +18,7 @@ from timelapse_rapidraw import (
 from timelapse_rapidraw import cli
 from timelapse_rapidraw.sidecar import dump, read_sidecar, sidecar_path
 
-REAL = Path("/mnt/user-data/uploads/wb.txt")
+REAL = Path(__file__).parent / "fixtures" / "r6_dusk_as_shot_kelvin.txt"
 
 
 def camera_kelvin(n, seed=5):
@@ -62,9 +62,8 @@ def test_smooth_removes_the_jumps_and_keeps_the_journey(folder):
     assert wb.kelvin[-1] - wb.kelvin[0] > 300                          # the drift survives
 
 
-@pytest.mark.skipif(not REAL.exists(), reason="real as-shot values not available")
 def test_on_the_real_r6_sequence():
-    k = np.array([float(l.split("\t")[1]) for l in REAL.read_text().strip().splitlines()])
+    k = np.array([float(l) for l in REAL.read_text().splitlines() if l and not l.startswith("#")])
     from timelapse_core import smooth_brightness
     smooth = 1e6 / smooth_brightness(1e6 / k, 50)
     assert np.abs(np.diff(k)).max() > 600                              # 669 K jumps from the camera
