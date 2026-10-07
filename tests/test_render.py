@@ -56,3 +56,16 @@ def test_frame_blending_keeps_every_frame(tmp_path):
     assert probe(render_video(folder, tmp_path / "b.mp4", fps=24, blend_frames=3))[2:] == ("24/1", 24)
     with pytest.raises(ValueError):
         render_video(folder, tmp_path / "x.mp4", blend_frames=9)
+
+
+def test_max_mb_keeps_the_file_under_the_limit(tmp_path):
+    import numpy as np
+    from PIL import Image
+    folder = tmp_path / "frames"
+    folder.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(48):                                              # detailed: hard to compress
+        Image.fromarray(rng.integers(0, 255, (320, 480, 3), dtype=np.uint8)).save(folder / f"{i:03d}.jpg")
+    video = render_video(folder, tmp_path / "small.mp4", fps=24, max_mb=0.3, width=480)
+    assert video.stat().st_size <= 0.3e6
+    assert probe(video)[2:] == ("24/1", 48)

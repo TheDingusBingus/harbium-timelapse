@@ -32,6 +32,7 @@ From the command line:
 timelapse check ~/Pictures/sunset
 timelapse deflicker ~/Pictures/sunset --csv corrections.csv
 timelapse render ~/Pictures/sunset-exported --fps 24      # quick preview video (needs ffmpeg)
+timelapse render ~/Pictures/sunset-exported --max-mb 10   # under 10 MB, for sending
 ```
 
 From Python:
