@@ -31,6 +31,7 @@ From the command line:
 ```bash
 timelapse check ~/Pictures/sunset
 timelapse deflicker ~/Pictures/sunset --csv corrections.csv
+timelapse render ~/Pictures/sunset-exported --fps 24      # quick preview video (needs ffmpeg)
 ```
 
 From Python:

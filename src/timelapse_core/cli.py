@@ -34,7 +34,16 @@ def main(argv: list[str] | None = None) -> int:
                        help="frames your own exposure changes are spread across (default: a third of the sequence)")
     flick.add_argument("--csv", type=Path, help="save per-frame results to a CSV file")
 
+    rend = sub.add_parser("render", help="make a quick preview video from finished frames (needs ffmpeg)")
+    rend.add_argument("folder", type=Path)
+    rend.add_argument("--fps", type=float, default=24, help="frames per second (default 24)")
+    rend.add_argument("--width", type=int, default=None, help="scale to this width, e.g. 3840 (default: native)")
+    rend.add_argument("--out", type=Path, default=None, help="video file to write (default: beside the folder)")
+
     args = parser.parse_args(argv)
+
+    if args.command == "render":
+        return _render(args)
 
     def reading(i: int, n: int) -> None:
         print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
@@ -81,6 +90,23 @@ def main(argv: list[str] | None = None) -> int:
             for frame, b, t, e, c in zip(fix.frames, fix.brightness, fix.target, fix.exposure, warmth):
                 w.writerow([frame.name, f"{b:.4f}", f"{t:.4f}", f"{e:+.4f}", f"{c:.4f}"])
         print(f"  Saved {args.csv}")
+    return 0
+
+
+def _render(args) -> int:
+    from .render import render_video
+
+    def progress(i: int, n: int) -> None:
+        print(f"\r  Rendering {i}/{n}", end="", file=sys.stderr, flush=True)
+        if i == n:
+            print(file=sys.stderr)
+
+    try:
+        video = render_video(args.folder.expanduser(), args.out, fps=args.fps, width=args.width, progress=progress)
+    except (RuntimeError, ValueError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"Saved {video}")
     return 0
 
 

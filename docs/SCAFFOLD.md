@@ -36,7 +36,8 @@ timelapse-core/
 │   ├── sequencer.py            # load, order, check. Plain-language Problems.
 │   ├── measure.py              # brightness per frame, in stops (added; see §4.1)
 │   ├── deflicker.py            # smooth_flicker → FlickerCorrections
-│   ├── cli.py                  # `timelapse check` / `timelapse deflicker`
+│   ├── render.py               # preview video via ffmpeg (external, optional)
+│   ├── cli.py                  # `timelapse check` / `deflicker` / `render`
 │   └── __init__.py             # public API
 ├── tests/                      # synthetic sequences with known truth
 └── integrations/rapidraw/      # milestone 2. Empty bar a README.
@@ -191,6 +192,7 @@ From RapidRAW's releases and source docs, and from two real sidecars James expor
 10. ⬜ GitHub: push, fill `[[ ]]` placeholders (CI workflow already in `.github/workflows/tests.yml`)
 11. ✅ `integrations/rapidraw/` — 16 tests passing on real sidecars; real end-to-end run pending (§5.3)
 12. ✅ `ramping.py` — automatic: finds setting changes and ND-style jumps, blends them (§4.4)
+12b. ✅ `timelapse render` — preview MP4 from finished frames via ffmpeg, any names, native size
 12a. ✅ Keyframes — core suggestions + blending; RapidRAW `suggest-keyframes`, `keyframes`, `restore`, keyframe-aware `check` (§4.4a, §5.2a). 63 core + 29 integration tests
 13. ⬜ Motion blur simulation
 
