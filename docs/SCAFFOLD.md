@@ -10,6 +10,10 @@ _Last updated: 2026-10-07. **First full real run complete:** check → suggest-k
 
 ---
 
+## Vision
+
+This library is the first-step processing core of a planned **end-to-end editor** (James's project). The core stays editor-agnostic; RapidRAW is its first adapter, the editor will be the next. Import-stage processes it should grow into: an analysis cache per shoot, lighting groups as well as sequences, **shoot-wide white balance consistency**, and the tool's own per-frame white balance estimate. Full notes: `docs/HANDOFF.md` §6.
+
 ## 0. Instructions for the dev session
 
 Read this whole document before writing code.
