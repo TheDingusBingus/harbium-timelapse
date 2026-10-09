@@ -78,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
                         '"first" (the first frame\'s), or a Kelvin number, e.g. 5600')
     w.add_argument("--smoothness", type=int, default=DEFAULT_SMOOTHNESS,
                    help=f"frames to smooth across (default {DEFAULT_SMOOTHNESS}); more is calmer, less follows the light more closely")
-    w.add_argument("--tint", type=float, default=0.0, help="tint to set alongside (default 0)")
+    w.add_argument("--tint", type=float, default=None,
+                   help="tint to set on every frame (default: the camera's own, smoothed, when it can be read)")
     w.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
     w.add_argument("--undo", action="store_true", help="put back each frame's previous white balance")
 
@@ -259,16 +260,21 @@ def _white_balance(seq, args) -> int:
     except ValueError as e:
         print(e, file=sys.stderr)
         return 1
+    print(f"  As-shot white balance read on {wb.scale}.")
     if np.isfinite(wb.as_shot).all():
         print(f"  Camera's white balance: {np.nanmin(wb.as_shot):.0f}-{np.nanmax(wb.as_shot):.0f} K, "
               f"jumping up to {wb.biggest_jump_before:.0f} K between frames.")
+    tint = (f"tint {wb.tint.min():+.1f} to {wb.tint.max():+.1f}" if np.ptp(wb.tint) else f"tint {wb.tint[0]:+g}")
     print(f"  New: {wb.kelvin.min():.0f}-{wb.kelvin.max():.0f} K, changing at most "
-          f"{wb.biggest_jump_after:.0f} K between frames. Tint {wb.tint:g}.")
+          f"{wb.biggest_jump_after:.0f} K between frames; {tint}.")
+    for note in wb.notes:
+        print(f"  Note: {note}")
     if args.dry_run:
         step = max(1, len(seq) // 8)
         for i in range(0, len(seq), step):
             shot = f"{wb.as_shot[i]:.0f} K" if np.isfinite(wb.as_shot[i]) else "unknown"
-            print(f"    {seq[i].name}: camera {shot} -> {wb.kelvin[i]:.0f} K")
+            shot_tint = f" {wb.as_shot_tint[i]:+.1f}" if wb.as_shot_tint is not None else ""
+            print(f"    {seq[i].name}: camera {shot}{shot_tint} -> {wb.kelvin[i]:.0f} K {wb.tint[i]:+.1f}")
         print("  Dry run: nothing written.")
         return 0
     print(f"  Wrote white balance to {apply_white_balance(seq, wb)} frames. Your Temperature and Tint "

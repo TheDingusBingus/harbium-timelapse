@@ -142,3 +142,73 @@ def test_keyframe_blend_keeps_the_steady_white_balance(folder):
     assert check(load(path)) == []
     undo_white_balance(with_kelvin(load(path), kelvin))               # still undoable after a blend
     assert written(images) == [None] * 150
+
+
+# --- exact: as-shot on RapidRAW's own scale, from raw neutrals -------------------
+
+from timelapse_core.colour_temperature import neutral_from_kelvin_tint
+from timelapse_rapidraw.cameras import MATRICES
+
+R6 = "Canon EOS R6"
+
+
+def with_neutrals(seq, kelvin, tint, camera=R6):
+    m = MATRICES[R6]
+    return Sequence(seq.folder, tuple(
+        replace(f, camera=camera, white_balance=None,
+                white_balance_neutral=tuple(float(x) for x in neutral_from_kelvin_tint(k, t, m["D65"], m["A"])))
+        for f, k, t in zip(seq, kelvin, tint)))
+
+
+def test_exact_with_no_jitter_writes_what_rapidraw_already_shows(folder):
+    # A steady drift (straight in mireds and tint) has nothing to smooth, so the
+    # written white balance must equal RapidRAW's own as-shot reading: no cast.
+    path, images, _ = folder
+    n = len(images)
+    kelvin = 1e6 / np.linspace(1e6 / 6000, 1e6 / 7200, n)
+    tint = np.linspace(12, 6, n)
+    wb = plan_white_balance(with_neutrals(load(path), kelvin, tint))
+    assert "RapidRAW" in wb.scale and not wb.notes
+    assert np.abs(wb.kelvin - kelvin).max() <= 1.0
+    assert np.abs(wb.tint - tint).max() <= 0.1
+
+
+def test_exact_smooths_tint_alongside_temperature(folder):
+    path, images, kelvin = folder
+    rng = np.random.default_rng(3)
+    tint = 10 + rng.normal(0, 4, len(images))
+    seq = with_neutrals(load(path), kelvin, tint)
+    wb = plan_white_balance(seq)
+    assert wb.biggest_jump_before > 400 and wb.biggest_jump_after < 60
+    assert np.abs(np.diff(wb.tint)).max() < np.abs(np.diff(tint)).max() / 4
+    assert 8 < wb.tint.mean() < 12                                      # the camera's tint is kept, not zeroed
+    apply_white_balance(seq, wb)
+    assert all(w["tint"] != 0 for w in written(images))
+
+
+def test_unknown_camera_falls_back_and_says_so(folder):
+    path, images, kelvin = folder
+    seq = with_neutrals(load(path), kelvin, np.full(len(images), 10.0), camera="Canon EOS 5D Mark IV")
+    seq = Sequence(seq.folder, tuple(replace(f, white_balance=float(k)) for f, k in zip(seq, kelvin)))
+    wb = plan_white_balance(seq)
+    assert "estimate" in wb.scale and set(wb.tint) == {0.0}
+    assert wb.notes and "Canon EOS 5D Mark IV" in wb.notes[0]
+
+
+def test_first_and_explicit_tint_on_the_exact_path(folder):
+    path, images, kelvin = folder
+    seq = with_neutrals(load(path), kelvin, np.full(len(images), 9.0))
+    first = plan_white_balance(seq, "first")
+    assert np.ptp(first.kelvin) == 0 and abs(first.tint[0] - 9.0) < 0.2
+    assert set(plan_white_balance(seq, tint=0).tint) == {0.0}
+
+
+def test_cli_reports_the_scale(folder, capsys, monkeypatch):
+    path, images, kelvin = folder
+    seq = with_neutrals(load(path), kelvin, np.full(len(images), 9.0))
+    monkeypatch.setattr(cli, "load", lambda *a, **k: seq, raising=False)
+    import argparse
+    args = argparse.Namespace(undo=False, to="smooth", smoothness=50, tint=None, dry_run=True)
+    assert cli._white_balance(seq, args) == 0
+    out = capsys.readouterr().out
+    assert "RapidRAW's own scale" in out and "Dry run" in out and "+9" in out

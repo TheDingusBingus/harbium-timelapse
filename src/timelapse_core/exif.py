@@ -31,6 +31,7 @@ Progress = Callable[[int, int], None]
 _EXIFTOOL_TAGS = [
     "-ExposureTime", "-FNumber", "-ISO", "-DateTimeOriginal",
     "-SubSecTimeOriginal", "-Model", "-ColorTempAsShot",
+    "-WB_RGGBLevelsAsShot", "-AsShotNeutral",
 ]
 
 
@@ -81,6 +82,7 @@ def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[st
                 iso=_positive(rec.get("ISO")),
                 camera=_text(rec.get("Model")),
                 white_balance=_positive(rec.get("ColorTempAsShot")),
+                white_balance_neutral=_neutral(rec),
             )
         if progress:
             progress(min(start + BATCH, len(paths)), len(paths))
@@ -150,6 +152,22 @@ def _read_with_exifread(path: Path) -> Frame:
 
 
 # --- helpers ----------------------------------------------------------------
+
+def _neutral(rec: dict) -> tuple[float, float, float] | None:
+    """As-shot neutral (green = 1) from a DNG's AsShotNeutral or Canon's RGGB levels."""
+    try:
+        if rec.get("AsShotNeutral"):
+            r, g, b = (float(v) for v in str(rec["AsShotNeutral"]).split()[:3])
+            return (r / g, 1.0, b / g) if min(r, g, b) > 0 else None
+        if rec.get("WB_RGGBLevelsAsShot"):
+            r, g1, g2, b = (float(v) for v in str(rec["WB_RGGBLevelsAsShot"]).split()[:4])
+            g = (g1 + g2) / 2
+            # levels are multipliers; the neutral is their reciprocal, scaled to green
+            return (g / r, 1.0, g / b) if min(r, g, b) > 0 else None
+    except (ValueError, TypeError):
+        return None
+    return None
+
 
 def _positive(value) -> float | None:
     if isinstance(value, (tuple, list)):

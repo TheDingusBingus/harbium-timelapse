@@ -30,6 +30,9 @@ class Frame:
     iso: float | None = None
     camera: str | None = None
     white_balance: float | None = None  # as-shot, Kelvin (needs ExifTool)
+    # As-shot neutral: how the sensor's red, green and blue saw grey, green = 1.
+    # The camera's own colour numbers, before any editor's Kelvin scale. Needs ExifTool.
+    white_balance_neutral: tuple[float, float, float] | None = None
 
     @property
     def name(self) -> str:
