@@ -169,3 +169,26 @@ timelapse-rapidraw restore "FOLDER"               :: everything back to before t
 ```
 
 **Order of work:** check → suggest-keyframes → (grade purple keyframes in RapidRAW) → keyframes → deflicker → white-balance → export → refine → export → … → render.
+
+---
+
+## Addendum — 9 Oct 2026 (built while James was away; branch `white-balance-exact`, not merged)
+
+**Read in RapidRAW's source (HEAD eb3556b, 9 Oct 2026) — facts, re-check per release:**
+- **Relative sliders DO apply on top of an absolute white balance.** Render target = `whiteBalance` (or as-shot if `null`), then shifted by `temperature` × 1.5 mired and `tint` × 1.5 tint units. Answers §4's open question (in this version). Exception: if `sectionVisibility.color` is false, the render uses as-shot and ignores both.
+- **RapidRAW's Kelvin/tint are standard and physically defined:** Robertson isotherms, tint = −3000 × offset from the locus (the DNG SDK convention), as-shot worked out from the raw neutral with rawler's dual-illuminant (A + D65) matrices. Tint range ±150; Kelvin 2,000–50,000.
+- **Consequence: `white-balance` as merged writes Canon's `ColorTempAsShot` (Canon's private Kelvin scale) with tint 0 into a field RapidRAW reads on its own scale.** Even unsmoothed, that is a global cast against as-shot, likely greener (our R6 samples read tint +11 and +20) plus an unknown Kelvin offset. Flicker would be fixed; colour would shift against the graded keyframes.
+- **Exposure is exact linear gain (`× 2^exposure`) before the AgX tonemapper.** The 1.4–1.8× seen by `refine` is output-side tonemapper/curve contrast, not a slider error.
+- **RapidRAW decodes at each frame's own as-shot WB** and only adapts when `whiteBalance` is set. With `null`, Auto WB's per-frame multipliers reach the pixels (colour *and* some brightness). Hypothesis: part of the original overshoot. Prediction: with exact WB applied, `refine` converges in fewer passes.
+
+**Built (branch `white-balance-exact`, 97 core + 71 RapidRAW tests passing):**
+- `timelapse_core/colour_temperature.py` — neutral ↔ Kelvin/tint, written from the published standards (Robertson table, DNG dual-illuminant interpolation). No editor code. Checked against a real frame: a solved neutral `0.644 1 0.474` → tint **+20** (Lightroom read **+21**); Kelvin 3,790 vs Lightroom's 3,550 — a *matrix* difference (Lightroom's R6 profile vs rawler's), not maths. **Lesson: the neutral is the portable truth; Kelvin is per-editor.**
+- `Frame.white_balance_neutral` (contract, optional) read by ExifTool from `WB_RGGBLevelsAsShot` (Canon) or `AsShotNeutral` (DNG).
+- `timelapse_rapidraw/cameras.py` — RapidRAW's (rawler's) matrices; R6 only so far.
+- `white-balance` now works out as-shot on RapidRAW's own scale, smooths mireds *and* tint, writes both. With no jitter it writes exactly RapidRAW's as-shot (identity test). Falls back to the old behaviour with a printed note when the neutral or camera is unknown. `--tint` now defaults to automatic.
+
+**To verify on return (RapidRAW closed):**
+1. `timelapse check "FOLDER"` still fine; then in Python: `load_sequence(...)[0].white_balance_neutral` is not None (ExifTool reads the RGGB levels on CR3).
+2. **Identity check:** pick one frame, note RapidRAW's as-shot Kelvin/tint readout; `white-balance --dry-run` should print the same (± 1 K, ± 0.5 tint) as "camera" for that frame. This proves our scale = RapidRAW's.
+3. Apply; check 1633→1634 steady, keyframe grades still present on top; export, render, measure colour wobble vs the light's 0.021.
+4. Then re-run `refine` and note passes needed / slider factor (tests the hypothesis above).
