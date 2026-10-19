@@ -188,8 +188,24 @@ def test_clean_sequence_has_no_problems(tmp_path):
 def test_export_can_ask_for_sixteen_bit_tiff(tmp_path, monkeypatch):
     from timelapse_rapidraw import cli as rcli
     calls = []
-    monkeypatch.setattr(rcli.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 1})())
+    monkeypatch.setattr(rcli, "_run_stoppable", lambda cmd: calls.append(cmd) or 1)
     rcli._export(tmp_path, tmp_path / "out", "rapidraw", 95, tiff16=True)
     rcli._export(tmp_path, tmp_path / "out", "rapidraw", 95)
     assert calls[0][-4:] == ["--format", "tiff", "--tiff-bit-depth", "16"]
     assert calls[1][-4:] == ["--format", "jpeg", "--quality", "95"]
+
+
+def test_ctrl_c_stops_rapidraw_too(monkeypatch):
+    from timelapse_rapidraw import cli as rcli
+    events = []
+    class Fake:
+        def __init__(self, cmd): events.append("started")
+        def wait(self, timeout=None):
+            if "terminated" not in events:
+                raise KeyboardInterrupt
+            return 0
+        def terminate(self): events.append("terminated")
+        def kill(self): events.append("killed")
+    monkeypatch.setattr(rcli.subprocess, "Popen", Fake)
+    assert rcli._run_stoppable(["rapidraw", "export"]) is None
+    assert events == ["started", "terminated"]

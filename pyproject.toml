@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 raw = ["rawpy>=0.21"]
+tiff = ["tifffile>=2023.1"]
 dev = ["pytest>=8", "rawpy>=0.21"]
 
 [project.scripts]

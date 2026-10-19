@@ -3,6 +3,8 @@
 _Prepared 9 October 2026, for moving into the end-to-end editor project._
 _Companion to `docs/SCAFFOLD.md` (the design record: every decision and why). This file is the story, the state, and what's next. Read this first, then the scaffold sections it points to._
 
+> **Current state (19 Oct 2026):** the workflow is **deflicker (+ white-balance) → one export → `timelapse finish`**; `refine` is optional. On the real R6 sequence the finished video measured 0.012 stops brightness change (the light's own pace) and 0.006 colour wobble; by eye "better than LRTimelapse, and significantly easier". Read **Addendum 2** at the end for everything learned on the way (Dehaze, LibRaw auto-maximum, crowds, 8-bit averaging). Next: a second, different sequence; patch-weighted measuring in `finish` for the small steps left at big ND turns.
+
 ---
 
 ## 0. In one breath

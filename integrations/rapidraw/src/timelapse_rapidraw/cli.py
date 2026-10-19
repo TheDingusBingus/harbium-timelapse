@@ -347,6 +347,21 @@ def _report_held(held: dict[str, str]) -> None:
             print(f"  Can't blend, so held from keyframe to keyframe: {shown}")
 
 
+def _run_stoppable(command: list[str]) -> int | None:
+    """Run RapidRAW; on Ctrl+C stop it too (it otherwise keeps exporting on
+    its own). Returns its exit code, or ``None`` if stopped."""
+    process = subprocess.Popen(command)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        return None
+
+
 def _export(folder: Path, output: Path, rapidraw: str | None, quality: int, tiff16: bool = False) -> int:
     exe = rapidraw or shutil.which("rapidraw")
     if not exe:
@@ -354,10 +369,16 @@ def _export(folder: Path, output: Path, rapidraw: str | None, quality: int, tiff
         return 1
     output.mkdir(parents=True, exist_ok=True)
     kind = ["--format", "tiff", "--tiff-bit-depth", "16"] if tiff16 else ["--format", "jpeg", "--quality", str(quality)]
-    result = subprocess.run([exe, "export", str(folder), "--output", str(output), *kind])
-    if result.returncode != 0:
+    print("  Exporting with RapidRAW. To stop: Ctrl+C.", file=sys.stderr, flush=True)
+    returncode = _run_stoppable([exe, "export", str(folder), "--output", str(output), *kind])
+    if returncode is None:
+        print("  Stopped. If RapidRAW keeps exporting, end it in Task Manager, or run:\n"
+              "    taskkill /IM RapidRAW.exe /F        (Git Bash: taskkill //IM RapidRAW.exe //F)",
+              file=sys.stderr)
+        return 130
+    if returncode != 0:
         print("RapidRAW's export didn't finish cleanly.", file=sys.stderr)
-        return result.returncode
+        return returncode
     rendered = load_sequence(output)
     seen = measure_brightness(rendered)
     left = float((seen - smooth_brightness(seen)).std())
