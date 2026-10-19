@@ -38,7 +38,10 @@ import numpy as np
 from PIL import Image
 
 from .deflicker import DEFAULT_WINDOW, smooth_brightness
-from .measure import LONG_EDGE, _PERCENTS, _srgb_to_linear, brightness_from_profiles, tone_profile
+from .measure import (
+    LONG_EDGE, _PERCENTS, _srgb_to_linear, brightness_from_profiles, steady_change, steady_series,
+    tone_profile,
+)
 from .render import RENDERABLE, ffmpeg_available
 from .sequencer import _natural_key
 
@@ -96,18 +99,29 @@ class FinishPlan:
         return float(np.max(np.abs(self.gains[:, 0] - self.gains[:, 2])))
 
 
-def measure_channels(frames: list[Path], progress: Progress | None = None) -> np.ndarray:
-    """Brightness of each colour channel of each frame (frames × 3, stops)."""
+def measure_channels(frames: list[Path], progress: Progress | None = None, steady: bool = True) -> np.ndarray:
+    """Brightness of each colour channel of each frame (frames × 3, stops).
+
+    Like deflicker's measurement: the change of the still part of the scene
+    since the previous frame, so walkers and cars can't sway it; the
+    whole-frame tone measure fills in where two frames can't be compared."""
     profiles = np.empty((3, len(frames), _PERCENTS.size))
+    steps: list[list] = [[], [], []]
+    previous = None
     for i, path in enumerate(frames):
         img = _read(path)
         step = max(1, max(img.shape[:2]) // LONG_EDGE)
         small = _srgb_to_linear(img[::step, ::step, :3].astype(np.float64) / _levels(img))
+        current = [np.where(small.max(axis=-1) >= 0.98, 1.0, small[..., c]) for c in range(3)]
         for c in range(3):
             profiles[c, i] = tone_profile(small[..., c])
+            if i:
+                steps[c].append(steady_change(previous[c], current[c]))
+        previous = current
         if progress:
             progress(i + 1, len(frames))
-    return np.column_stack([brightness_from_profiles(profiles[c]) for c in range(3)])
+    band = [brightness_from_profiles(profiles[c]) for c in range(3)]
+    return np.column_stack([steady_series(steps[c], band[c]) if steady else band[c] for c in range(3)])
 
 
 def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool = True,

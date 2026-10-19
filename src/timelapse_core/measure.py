@@ -60,8 +60,19 @@ def measure_light(
     frames: Sequence | Iterable[Path | str],
     speed: str = "careful",
     progress: Progress | None = None,
+    steady: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Brightness and warmth of every frame.
+
+    Brightness is measured on the still part of the scene: each pixel is
+    compared with the same pixel in the previous frame, pixels that moved far
+    more than the rest (walkers, cars, birds) are set aside, and the change is
+    measured on the remainder. Flicker, real light and exposure changes move
+    nearly every pixel, so they're measured in full.
+    (A crowd crossing 15% of a real frame read as 0.2 stops of "darkening" on
+    the whole-frame measure, and deflicker brightened that frame by mistake.)
+    Needs a camera that stays put, as on any timelapse tripod. ``steady=False``
+    uses the whole-frame tone measure alone.
 
     Warmth is how red the light is compared with blue, in stops: higher is
     warmer. Like brightness, only the differences between frames matter.
@@ -75,6 +86,8 @@ def measure_light(
 
     profiles = np.empty((len(paths), _PERCENTS.size))
     warmth = np.empty(len(paths))
+    steps: list[float | None] = []
+    previous = None
     for i, path in enumerate(paths):
         try:
             image, warmth[i] = _load(path, speed)
@@ -83,9 +96,67 @@ def measure_light(
         except Exception as e:
             raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
         profiles[i] = tone_profile(image)
+        current = steady_input(image)
+        if i:
+            steps.append(steady_change(previous, current))
+        previous = current
         if progress:
             progress(i + 1, len(paths))
-    return brightness_from_profiles(profiles), warmth
+    band = brightness_from_profiles(profiles)
+    return (steady_series(steps, band) if steady else band), warmth
+
+
+MIN_STEADY_PIXELS = 500   # fewer usable still pixels shared by two frames: fall back to the tone measure
+MOVER = 0.25              # stops: a pixel that changed this much more than the frame's typical change is moving
+
+
+def steady_input(linear: np.ndarray) -> np.ndarray:
+    """One brightness value per pixel (2-D, linear) for ``steady_change``;
+    blown pixels are marked as blown so they're left out."""
+    img = np.asarray(linear, dtype=np.float64)
+    if img.ndim == 2:
+        return img
+    lum = img[..., 0] * 0.2126 + img[..., 1] * 0.7152 + img[..., 2] * 0.0722
+    return np.where(img.max(axis=-1) >= CLIPPED, 1.0, lum)
+
+
+def steady_change(previous: np.ndarray | None, current: np.ndarray) -> float | None:
+    """How much the still part of the scene changed between two frames, in stops.
+
+    Per-pixel changes find the movers: pixels that changed far more (or less)
+    than the frame's typical change (people, cars, birds). The change is then
+    the ratio of the still pixels' total brightness. Totals over thousands of
+    pixels average out 8-bit rounding, which per-pixel medians don't, and the
+    ratio is exact for any change that really is global.
+    ``None`` if the two frames can't be compared."""
+    if previous is None or previous.shape != current.shape:
+        return None
+    ok = (previous > BLACK) & (current > BLACK) & (previous < CLIPPED) & (current < CLIPPED)
+    if ok.sum() < MIN_STEADY_PIXELS:
+        return None
+    p, c = previous[ok], current[ok]
+    d = np.log2(c) - np.log2(p)
+    typical = np.median(d)
+    spread = 1.4826 * np.median(np.abs(d - typical))
+    still = np.abs(d - typical) < max(MOVER, 3 * spread)
+    if still.sum() < MIN_STEADY_PIXELS:
+        return None
+    return float(np.log2(c[still].sum() / p[still].sum()))
+
+
+def steady_series(steps: list, fallback: np.ndarray) -> np.ndarray:
+    """Chain frame-to-frame changes into one brightness per frame. Where two
+    frames couldn't be compared, the tone measure's change is used instead.
+    Kept at the same overall level as ``fallback``."""
+    fallback = np.asarray(fallback, dtype=np.float64)
+    out = np.empty(len(fallback))
+    if not len(out):
+        return out
+    out[0] = 0.0
+    for i in range(1, len(out)):
+        step = steps[i - 1] if i - 1 < len(steps) else None
+        out[i] = out[i - 1] + (step if step is not None else fallback[i] - fallback[i - 1])
+    return out - np.nanmean(out) + np.nanmean(fallback)
 
 
 def brightness_of(linear_rgb: np.ndarray) -> float:
