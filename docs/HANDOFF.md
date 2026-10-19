@@ -192,3 +192,24 @@ timelapse-rapidraw restore "FOLDER"               :: everything back to before t
 2. **Identity check:** pick one frame, note RapidRAW's as-shot Kelvin/tint readout; `white-balance --dry-run` should print the same (± 1 K, ± 0.5 tint) as "camera" for that frame. This proves our scale = RapidRAW's.
 3. Apply; check 1633→1634 steady, keyframe grades still present on top; export, render, measure colour wobble vs the light's 0.021.
 4. Then re-run `refine` and note passes needed / slider factor (tests the hypothesis above).
+
+---
+
+## Addendum 2 — 19 Oct 2026: what the real sequence taught us, and the `finish` paradigm
+
+**Verified on the real sequence (R6, 229 frames):**
+- **Exact white balance works.** Our Kelvin/tint = RapidRAW's own as-shot readout on 181A1579 (6457 K / +27, checked in the app). Tint really runs +27 → −9 through dusk; the old tint-0 write would have cast it. Colour wobble 0.051 → 0.029.
+- **RapidRAW Dehaze reads haze before Exposure** (`refined_dark_channel` samples `input_texture`; fixed atmospheric light 0.95/0.97/1.0). Brighter raw → harder dehaze → midtones down, deep shadows up. Measured: at the 1659 ND turn the tone shape jumped +0.42 / −0.27; with Dehaze 0 alone: −0.05 / +0.06. RAW itself: pure brightness step (shape ±0.1). **Never use Dehaze on sequences with exposure changes.** Worth an upstream issue: scale the dark channel by the exposure gain.
+- **LibRaw's default `adjust_maximum_thr = 0.75` invented flicker in our own measurement.** A frame whose brightest pixel sat just above 75% of white was rescaled to it: +0.32 to +0.44 stops on 1626/1628/1631/1632, whose light was steady (raw sensor counts: ±0.03). Also per-frame camera WB leaked into brightness. Fixed in `measure.py` (auto-maximum off, one fixed WB for every frame), with tests. Much of the old "slider acts like 1.4–1.8 stops" and the first render being worse than the RAWs (0.136 vs 0.111) came from this.
+- **Even then, RapidRAW moves the render ~18% more per stop of Exposure than per stop of real light** (2.15 vs 1.83 on the real 1634 ND step, same with the grade stripped back). Cause unknown; not chased. RAW-sized corrections therefore land within ~0.05 but never exactly in RapidRAW.
+- Result in RapidRAW: deflicker (true measurement) → export 0.046 → one exposure-only refine pass → **0.013**, biggest frame jump 0.05. Colour still 0.030 (ND/ISO casts at 1802, 1659, 1804, 1645).
+
+**Refine fixes:** colour passes leave Exposure alone (`--colour` = colour only); Exposure strength is remembered per pass, or relearned only from passes where Exposure moved (a colour-only pass once taught it nonsense: 1.5-stop errors); first Temperature guess 0.012/unit from RapidRAW's 1.5 mired/unit (0.005 overshot ~2.5×).
+
+**Paradigm shift (James, agreed): correct the finished frames, not the editor's sliders.** Steering a black-box renderer through sliders needs its response modelled, and every editor has its own surprises (Dehaze, the 1.18 ratio). New `timelapse finish`: measures each exported frame per colour channel on the shared tonal band, smooths each channel's journey, applies one linear-light gain per channel per frame through exact lookup tables. Global, no halos, exact by construction (it corrects what it measures, in the same terms), works after any editor, no adapter needed. Writes corrected frames (same names/formats; JPEG q95 4:4:4; 16-bit TIFF via `tifffile`) and/or encodes a video straight from them (nothing stored in between). Synthetic test: brightness 0.056 → 0.005, colour 0.041 → 0.008, journey kept. Speed at 20 MP: ~0.5 s/frame measuring, ~1 s/frame writing JPEG, ~2 s/frame encoding 4K.
+
+**Intended workflow now:** prepare (white-balance + deflicker into sidecars: the coarse work, before the grade) → export once from any editor → `finish`. `refine` becomes optional. In James's own editor, the same library corrections apply before the non-linear stages, exactly, in one pass.
+
+**Lessons (process):** three times the bug was our own instrument (whole-frame warmth with per-frame masks; LibRaw auto-maximum; a script reading the ledger wrong), and one test had an invalid premise. Check the ruler against ground truth (raw sensor counts) before building theories on it; after a failed prediction, stop and rethink rather than generating the next theory.
+
+**RapidRAW notes:** headless export can't resize (`resize: None` hardcoded) — every measuring export is full-res; a `--resize` flag upstream would speed everyone up. `--adjustments FILE` overrides a frame's edit without touching sidecars (useful for controlled tests).

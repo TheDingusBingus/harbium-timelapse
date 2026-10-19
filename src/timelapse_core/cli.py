@@ -1,6 +1,7 @@
-"""Command line: ``timelapse check FOLDER`` and ``timelapse deflicker FOLDER``.
+"""Command line: ``timelapse check | deflicker | render | finish``.
 
-Read-only. Nothing here changes a photo or a sidecar.
+Nothing here changes a photo or a sidecar. ``finish`` writes corrected copies
+of exported frames (and/or a video) to a new place; the export is untouched.
 """
 
 from __future__ import annotations
@@ -44,10 +45,25 @@ def main(argv: list[str] | None = None) -> int:
     rend.add_argument("--blend-frames", type=int, default=1,
                       help="mix each frame with its neighbours, 2 or 3, to calm moving leaves (default 1: off)")
 
+    fin = sub.add_parser("finish", help="take the last flicker and colour wobble out of exported frames, "
+                                        "then write corrected frames and/or a video")
+    fin.add_argument("folder", type=Path, help="your exported frames (JPEG, PNG or TIFF), every frame, in order")
+    fin.add_argument("--out", type=Path, default=None, help="folder for corrected frames (same names and formats)")
+    fin.add_argument("--video", type=Path, default=None, help="MP4 to make straight from the corrected frames")
+    fin.add_argument("--fps", type=float, default=24, help="frames per second for the video (default 24)")
+    fin.add_argument("--width", type=int, default=None, help="video width, e.g. 3840 (default: native)")
+    fin.add_argument("--window", type=int, default=DEFAULT_WINDOW,
+                     help=f"frames to smooth across (default {DEFAULT_WINDOW})")
+    fin.add_argument("--brightness-only", action="store_true", help="leave colour exactly as exported")
+    fin.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
+    fin.add_argument("--csv", type=Path, help="save per-frame measurements and corrections")
+
     args = parser.parse_args(argv)
 
     if args.command == "render":
         return _render(args)
+    if args.command == "finish":
+        return _finish(args)
 
     def reading(i: int, n: int) -> None:
         print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
@@ -112,6 +128,58 @@ def _render(args) -> int:
         print(e, file=sys.stderr)
         return 1
     print(f"Saved {video} ({video.stat().st_size / 1e6:.1f} MB)")
+    return 0
+
+
+def _finish(args) -> int:
+    from .finish import apply_finish, finished_frames, measure_channels, plan_finish
+
+    def bar(word):
+        def progress(i: int, n: int) -> None:
+            print(f"\r  {word} {i}/{n}", end="", file=sys.stderr, flush=True)
+            if i == n:
+                print(file=sys.stderr)
+        return progress
+
+    if not (args.dry_run or args.out or args.video):
+        print("Say where to put the result: --out FOLDER for frames, --video FILE.mp4, or both "
+              "(or --dry-run to just measure).", file=sys.stderr)
+        return 1
+    try:
+        frames = finished_frames(args.folder.expanduser())
+        print(f"{len(frames)} finished frames in {frames[0].parent}")
+        p = plan_finish(frames, window=args.window, colour=not args.brightness_only, progress=bar("Measuring"))
+    except (ValueError, OSError) as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    print(f"  Brightness wobble: {p.brightness_before:.3f} stops now, {p.brightness_after:.3f} after")
+    if not args.brightness_only:
+        print(f"  Colour wobble:     {p.colour_before:.3f} now, {p.colour_after:.3f} after")
+    print(f"  Largest correction: {p.largest_brightness_correction:.3f} stops"
+          + ("" if args.brightness_only else f", colour {p.largest_colour_correction:.3f}"))
+    if args.csv:
+        with open(args.csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["frame", "red", "green", "blue", "gain_red", "gain_green", "gain_blue"])
+            for path, m, g in zip(p.frames, p.measured, p.gains):
+                w.writerow([path.name, *(f"{v:.4f}" for v in m), *(f"{v:+.4f}" for v in g)])
+        print(f"  Saved {args.csv}")
+    if args.dry_run:
+        print("  Dry run: nothing written.")
+        return 0
+    try:
+        apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width, progress=bar("Writing"))
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    if args.out:
+        from .finish import _wobble, LUMA
+        check = measure_channels(finished_frames(args.out), bar("Checking"))
+        print(f"  Measured on the corrected frames: brightness {_wobble(check @ LUMA):.3f} stops, "
+              f"colour {_wobble(check[:, 0] - check[:, 2]):.3f}")
+        print(f"  Corrected frames: {args.out}")
+    if args.video:
+        print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
     return 0
 
 

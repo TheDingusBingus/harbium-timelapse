@@ -33,6 +33,8 @@ timelapse check ~/Pictures/sunset
 timelapse deflicker ~/Pictures/sunset --csv corrections.csv
 timelapse render ~/Pictures/sunset-exported --fps 24      # quick preview video (needs ffmpeg)
 timelapse render ~/Pictures/sunset-exported --max-mb 10   # under 10 MB, for sending
+timelapse finish ~/Pictures/sunset-exported --video sunset.mp4        # last flicker + colour wobble out, straight to video
+timelapse finish ~/Pictures/sunset-exported --out ~/Pictures/sunset-final   # or corrected frames for your video editor
 ```
 
 From Python:
