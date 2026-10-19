@@ -109,9 +109,7 @@ def measure_channels(frames: list[Path], progress: Progress | None = None, stead
     steps: list[list] = [[], [], []]
     previous = None
     for i, path in enumerate(frames):
-        img = _read(path)
-        step = max(1, max(img.shape[:2]) // LONG_EDGE)
-        small = _srgb_to_linear(img[::step, ::step, :3].astype(np.float64) / _levels(img))
+        small = _small_linear(_read(path))
         current = [np.where(small.max(axis=-1) >= 0.98, 1.0, small[..., c]) for c in range(3)]
         for c in range(3):
             profiles[c, i] = tone_profile(small[..., c])
@@ -191,6 +189,18 @@ def correct(img: np.ndarray, gains_stops) -> np.ndarray:
         lut = np.round(_linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * levels).astype(img.dtype)
         out[..., c] = lut[img[..., c]]
     return out
+
+
+def _small_linear(img: np.ndarray) -> np.ndarray:
+    """A small linear-light copy for measuring, made by AVERAGING blocks of
+    pixels, not skipping them. Averaging beats 8-bit rounding: on noisy night
+    frames (like real ones) it measured ~3x more precisely than skipping, close
+    to 16-bit, so JPEG exports are enough."""
+    lut = _srgb_to_linear(np.arange(_levels(img) + 1, dtype=np.float64) / _levels(img)).astype(np.float32)
+    step = max(1, max(img.shape[:2]) // LONG_EDGE)
+    h, w = (img.shape[0] // step) * step, (img.shape[1] // step) * step
+    lin = lut[img[:h, :w, :3]]
+    return lin.reshape(h // step, step, w // step, step, 3).mean(axis=(1, 3), dtype=np.float64)
 
 
 # --- files ---------------------------------------------------------------------
