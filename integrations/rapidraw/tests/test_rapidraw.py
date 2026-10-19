@@ -183,3 +183,13 @@ def test_virtual_copies_are_noted_and_left_alone(tmp_path):
 def test_clean_sequence_has_no_problems(tmp_path):
     make_sequence(tmp_path, 24)
     assert check(load(tmp_path)) == []
+
+
+def test_export_can_ask_for_sixteen_bit_tiff(tmp_path, monkeypatch):
+    from timelapse_rapidraw import cli as rcli
+    calls = []
+    monkeypatch.setattr(rcli.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 1})())
+    rcli._export(tmp_path, tmp_path / "out", "rapidraw", 95, tiff16=True)
+    rcli._export(tmp_path, tmp_path / "out", "rapidraw", 95)
+    assert calls[0][-4:] == ["--format", "tiff", "--tiff-bit-depth", "16"]
+    assert calls[1][-4:] == ["--format", "jpeg", "--quality", "95"]

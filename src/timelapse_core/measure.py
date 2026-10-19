@@ -231,8 +231,26 @@ def warmth_of(linear_rgb: np.ndarray) -> float:
 def _load(path: Path, speed: str) -> tuple[np.ndarray, float]:
     if path.suffix.lower() in RAW_EXTENSIONS:
         return _load_raw(path, speed)
+    if path.suffix.lower() in (".tif", ".tiff"):
+        rgb = _load_tiff(path)
+        if rgb is not None:
+            return rgb, warmth_of(rgb)
     rgb = _load_image(Image.open(path))
     return rgb, warmth_of(rgb)
+
+
+def _load_tiff(path: Path) -> np.ndarray | None:
+    """16-bit TIFFs at full precision (Pillow can't read 16-bit colour).
+    ``None`` if tifffile isn't installed or the file isn't plain RGB."""
+    try:
+        import tifffile
+    except ImportError:
+        return None
+    arr = tifffile.imread(str(path))
+    if arr.ndim != 3 or arr.shape[-1] < 3 or arr.dtype not in (np.uint8, np.uint16):
+        return None
+    levels = 65535.0 if arr.dtype == np.uint16 else 255.0
+    return _srgb_to_linear(_shrink(arr[..., :3]).astype(np.float64) / levels)
 
 
 def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:

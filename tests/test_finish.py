@@ -109,3 +109,47 @@ def test_cli_dry_run_and_real_run(tmp_path, capsys):
     assert cli.main(["finish", str(tmp_path / "e"), "--out", str(tmp_path / "out")]) == 0
     out = capsys.readouterr().out
     assert "Measured on the corrected frames" in out and len(list((tmp_path / "out").iterdir())) == N
+
+
+# --- dark sequences: 16-bit in, small files out ----------------------------------
+
+def dark_export(folder, kind):
+    tifffile = pytest.importorskip("tifffile")
+    folder.mkdir()
+    lin = scene() * 2.0 ** -5.0                          # deep twilight: shadows on very few 8-bit levels
+    for i in range(N):
+        img = _linear_to_srgb(np.clip(lin * 2.0 ** (TREND[i] + WOBBLE[i]), 0, 1))
+        if kind == "tif":
+            tifffile.imwrite(str(folder / f"f{i + 1}.tif"), np.round(img * 65535).astype(np.uint16))
+        else:
+            Image.fromarray(np.round(img * 255).astype(np.uint8)).save(folder / f"f{i + 1}.jpg", quality=95)
+    return finished_frames(folder)
+
+
+def test_sixteen_bit_measures_dark_frames_exactly_where_jpeg_cannot(tmp_path):
+    true = TREND + WOBBLE
+    errs = {}
+    for kind in ("jpg", "tif"):
+        m = measure_channels(dark_export(tmp_path / kind, kind))
+        errs[kind] = np.abs((m - m.mean(0)) - (true - true.mean(0))).max()
+    assert errs["tif"] < 0.005 and errs["tif"] < errs["jpg"] / 3
+
+
+def test_correct_in_sixteen_bit_write_jpegs(tmp_path):
+    frames = dark_export(tmp_path / "e", "tif")
+    apply_finish(plan_finish(frames), out=tmp_path / "out", fmt="jpg")
+    out = finished_frames(tmp_path / "out")
+    assert [f.suffix for f in out] == [".jpg"] * N and [f.stem for f in out] == [f.stem for f in frames]
+    assert np.asarray(Image.open(out[0])).dtype == np.uint8
+
+
+def test_rejects_unknown_output_format(tmp_path):
+    with pytest.raises(ValueError, match="format"):
+        apply_finish(plan_finish(export(tmp_path / "e")), out=tmp_path / "out", fmt="webp")
+
+
+def test_deflicker_measurement_reads_sixteen_bit_tiff(tmp_path):
+    from timelapse_core import measure_light
+    b, _ = measure_light(dark_export(tmp_path / "e", "tif"))
+    true = (TREND + WOBBLE) @ LUMA
+    assert np.abs((b - b.mean()) - (true - true.mean())).max() < 0.02

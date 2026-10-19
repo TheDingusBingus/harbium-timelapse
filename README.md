@@ -35,6 +35,8 @@ timelapse render ~/Pictures/sunset-exported --fps 24      # quick preview video 
 timelapse render ~/Pictures/sunset-exported --max-mb 10   # under 10 MB, for sending
 timelapse finish ~/Pictures/sunset-exported --video sunset.mp4        # last flicker + colour wobble out, straight to video
 timelapse finish ~/Pictures/sunset-exported --out ~/Pictures/sunset-final   # or corrected frames for your video editor
+# Going into night? Export 16-bit TIFF (8-bit shadows are too coarse to correct precisely), write JPEGs:
+timelapse finish ~/Pictures/sunset-tiff16 --format jpg --out ~/Pictures/sunset-final --video sunset.mp4
 ```
 
 From Python:

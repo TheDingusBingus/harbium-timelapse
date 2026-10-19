@@ -144,10 +144,17 @@ def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool =
 
 def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | str | None = None,
                  fps: float = 24, width: int | None = None, quality: int = 16,
-                 progress: Progress | None = None) -> None:
-    """Correct every frame. ``out``: a folder for corrected frames (same names
-    and formats). ``video``: an MP4 encoded straight from the corrected frames,
-    so nothing in between needs storing. Your exported frames are never changed."""
+                 progress: Progress | None = None, fmt: str | None = None) -> None:
+    """Correct every frame. ``out``: a folder for corrected frames (same names;
+    same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
+    encoded straight from the corrected frames, so nothing in between needs
+    storing. Your exported frames are never changed.
+
+    Frames that go dark (dusk into night) are best exported as 16-bit TIFF:
+    in 8-bit, shadows have too few levels to measure or correct small changes
+    precisely. Correct in 16-bit, write JPEGs with ``fmt="jpg"``."""
+    if fmt is not None and fmt.lower().lstrip(".") not in ("jpg", "jpeg", "png", "tif", "tiff"):
+        raise ValueError('The output format must be "jpg", "png" or "tif".')
     if out is None and video is None:
         raise ValueError("Say where to put the result: a folder for frames, a video file, or both.")
     if out is not None:
@@ -161,7 +168,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
             img, info = _read(path, with_info=True)
             fixed = correct(img, gains)
             if out is not None:
-                _write(out / path.name, fixed, info)
+                target = out / path.name if fmt is None else (out / path.name).with_suffix("." + fmt.lower().lstrip("."))
+                _write(target, fixed, info)
             if video is not None:
                 if encoder is None:
                     encoder = _Encoder(Path(video), fixed, fps, width, quality)
@@ -217,10 +225,12 @@ def _read(path: Path, with_info: bool = False):
 
 def _write(path: Path, img: np.ndarray, info: dict) -> None:
     suffix = path.suffix.lower()
-    if img.dtype == np.uint16 or info.get("tiff"):
+    if suffix in (".tif", ".tiff") and (img.dtype == np.uint16 or info.get("tiff")):
         import tifffile
         tifffile.imwrite(str(path), img, photometric="rgb", compression="zlib")
         return
+    if img.dtype == np.uint16:                      # 16-bit in, 8-bit out (JPEG, PNG)
+        img = np.round(img / 257.0).astype(np.uint8)
     extra = {k: v for k, v in info.items() if k in ("exif", "icc_profile", "dpi")}
     if suffix in (".jpg", ".jpeg"):
         Image.fromarray(img).save(path, quality=JPEG_QUALITY, subsampling=0, **extra)

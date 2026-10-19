@@ -54,6 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     fin.add_argument("--width", type=int, default=None, help="video width, e.g. 3840 (default: native)")
     fin.add_argument("--window", type=int, default=DEFAULT_WINDOW,
                      help=f"frames to smooth across (default {DEFAULT_WINDOW})")
+    fin.add_argument("--format", default=None, choices=["jpg", "png", "tif"],
+                     help="write corrected frames in this format (default: same as the export). "
+                          "For dark sequences: export 16-bit TIFF, write jpg")
     fin.add_argument("--brightness-only", action="store_true", help="leave colour exactly as exported")
     fin.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
     fin.add_argument("--csv", type=Path, help="save per-frame measurements and corrections")
@@ -168,7 +171,8 @@ def _finish(args) -> int:
         print("  Dry run: nothing written.")
         return 0
     try:
-        apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width, progress=bar("Writing"))
+        apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width, progress=bar("Writing"),
+                     fmt=args.format)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1

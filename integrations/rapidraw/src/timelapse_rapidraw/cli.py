@@ -95,6 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("output", type=Path)
     e.add_argument("--rapidraw", default=None, help="path to the rapidraw command, if not on PATH")
     e.add_argument("--quality", type=int, default=95)
+    e.add_argument("--tiff16", action="store_true",
+                   help="16-bit TIFF instead of JPEG: best for sequences that go dark, then "
+                        "timelapse finish ... --format jpg (needs: pip install tifffile)")
 
     args = ap.parse_args(argv)
     folder = args.folder.expanduser()
@@ -119,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "export":
-        return _export(folder, args.output.expanduser(), args.rapidraw, args.quality)
+        return _export(folder, args.output.expanduser(), args.rapidraw, args.quality, args.tiff16)
 
     def reading(i, n):
         print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
@@ -344,14 +347,14 @@ def _report_held(held: dict[str, str]) -> None:
             print(f"  Can't blend, so held from keyframe to keyframe: {shown}")
 
 
-def _export(folder: Path, output: Path, rapidraw: str | None, quality: int) -> int:
+def _export(folder: Path, output: Path, rapidraw: str | None, quality: int, tiff16: bool = False) -> int:
     exe = rapidraw or shutil.which("rapidraw")
     if not exe:
         print("Can't find the rapidraw command. Pass its location with --rapidraw.", file=sys.stderr)
         return 1
     output.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run([exe, "export", str(folder), "--output", str(output),
-                             "--format", "jpeg", "--quality", str(quality)])
+    kind = ["--format", "tiff", "--tiff-bit-depth", "16"] if tiff16 else ["--format", "jpeg", "--quality", str(quality)]
+    result = subprocess.run([exe, "export", str(folder), "--output", str(output), *kind])
     if result.returncode != 0:
         print("RapidRAW's export didn't finish cleanly.", file=sys.stderr)
         return result.returncode
