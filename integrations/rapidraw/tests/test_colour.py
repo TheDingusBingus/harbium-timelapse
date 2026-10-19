@@ -174,3 +174,39 @@ def test_colour_only_undo_keeps_the_exposure_work(awb_sequence):
     assert np.allclose(exposures(images), exposure_before)
     history = (folder / ".timelapse-core" / "refine.json").read_text()
     assert "applied_temp" not in history and "render" in history
+
+
+# --- found on the real sequence: colour and exposure passes must not mix ----------
+
+def test_colour_only_pass_leaves_exposure_exactly(awb_sequence):
+    folder, images, raw, kelvin, loader = awb_sequence
+    light_w = np.linspace(0, 0.3, N)
+    before_e, before_t = exposures(images).copy(), temperatures(images).copy()
+    one_pass(folder, images, raw, kelvin, light_w, loader, white_balance="steady", adjust_exposure=False)
+    assert np.array_equal(exposures(images), before_e)
+    assert not np.array_equal(temperatures(images), before_t)
+
+
+def test_exposure_strength_is_remembered_not_learned_from_a_colour_pass():
+    # A colour pass moves Temperature, which nudges brightness; Exposure doesn't
+    # move. The next exposure pass must not read those nudges as the slider's
+    # strength (on the real sequence that produced 1.5-stop errors).
+    from timelapse_rapidraw.refine import _slider_strength
+    n = 60
+    applied = np.zeros(n)
+    history = [{"render": np.zeros(n).tolist(), "applied": applied.tolist(), "strength": [2.1] * n}]
+    render_now = np.random.default_rng(1).normal(0, 0.02, n)          # brightness nudged by the colour pass
+    s = _slider_strength(None, render_now, applied, np.zeros(n), history, None, 25)
+    assert np.allclose(s, 2.1)
+
+
+def test_strength_relearned_from_earlier_passes_when_not_stored():
+    # History written before strengths were stored: learn from the last pair of
+    # passes where Exposure really moved, not from a colour-only change.
+    from timelapse_rapidraw.refine import _slider_strength
+    n = 60
+    a0, a1 = np.zeros(n), np.full(n, -0.2)
+    history = [{"render": np.zeros(n).tolist(), "applied": a0.tolist()},
+               {"render": (2.1 * (a1 - a0)).tolist(), "applied": a1.tolist()}]   # exposure moved: 2.1x
+    s = _slider_strength(None, np.zeros(n), a1, np.zeros(n), history, None, 25)  # now: nothing moved
+    assert np.allclose(np.nanmedian(s), 2.1, atol=0.01)

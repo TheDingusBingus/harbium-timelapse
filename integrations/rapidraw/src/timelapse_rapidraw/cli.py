@@ -64,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("export", type=Path, help="folder of exported frames (JPEG/PNG/TIFF), every frame, in order")
     rf.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
     rf.add_argument("--colour", action="store_true",
-                    help="also correct colour via the relative Temperature slider (experimental; "
+                    help="colour-only pass via the relative Temperature slider; Exposure is left as it is, "
+                         "so finish the exposure passes first (experimental; "
                          "for camera white balance jumps, use the white-balance command instead)")
     rf.add_argument("--white-balance", default="auto",
                     help='"smooth" (default with ExifTool: follow a heavily smoothed curve of the camera\'s '
@@ -297,7 +298,8 @@ def _refine(seq, args) -> int:
         return 1
     try:
         result = refine(seq, args.export.expanduser(), progress=_measuring, dry_run=args.dry_run,
-                        colour=args.colour, white_balance=wb)
+                        colour=args.colour, white_balance=wb,
+                        adjust_exposure=not args.colour)
     except ValueError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
@@ -310,7 +312,8 @@ def _refine(seq, args) -> int:
     if result.slider_strength == result.slider_strength:
         print(f"  In this grade, +1 on Exposure moves the render about {result.slider_strength:.1f} stops.")
     else:
-        print("  Brightness is already steady; adjusting colour only.")
+        print("  Colour pass: Exposure is left exactly as it is." if args.colour
+              else "  Brightness is already steady; adjusting colour only.")
     if result.colour_strength == result.colour_strength:
         if result.colour_guessed:
             print("  Temperature: a careful first step, to learn how RapidRAW's slider behaves. "

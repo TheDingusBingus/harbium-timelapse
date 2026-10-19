@@ -60,7 +60,11 @@ MOST_PER_PASS = 1.0     # stops; no single pass moves a frame further than this
 STRENGTH_RANGE = (0.3, 6.0)
 INVISIBLE_COLOUR = 0.015  # red-over-blue stops of frame-to-frame colour wobble
 MOST_COLOUR_PER_PASS = 0.3  # red-over-blue stops
-FIRST_GUESS = 0.005       # warmth per Temperature unit, used only if it can't be estimated
+FIRST_GUESS = 0.012       # warmth per Temperature unit, used only if it can't be estimated.
+                          # From RapidRAW's source: +1 Temperature = 1.5 mired; on a Canon R6
+                          # that is ~0.0095 raw red/blue stops per mired, ~0.87x of it in the
+                          # render. (0.005 overshot ~2.5x on the real sequence.) Refine then
+                          # measures the real value from the next export.
 FIRST_GUESS_CAP = 10.0    # Temperature units: a careful first step when guessing
 RENDERED = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
@@ -96,9 +100,14 @@ def refine(
     raw_warmth: np.ndarray | None = None,
     colour: bool = True,
     white_balance: str | float = "auto",
+    adjust_exposure: bool = True,
 ) -> RefineResult:
     """One refinement pass. ``rendered`` is the folder of exported frames,
-    in the same order and number as the sequence."""
+    in the same order and number as the sequence.
+
+    ``adjust_exposure=False`` makes a colour-only pass: Exposure is left
+    exactly as it is. Temperature changes nudge the render's brightness too,
+    so exposure and colour are best refined in separate passes."""
     ledger = read_ledger(seq.folder)
     if not ledger:
         raise ValueError("Run deflicker first: refine improves deflicker, it doesn't replace it.")
@@ -127,7 +136,7 @@ def refine(
     history = _read_history(seq.folder)
     pass_number = len(history) + 1
 
-    fix_light = flicker >= INVISIBLE
+    fix_light = adjust_exposure and flicker >= INVISIBLE
     fix_colour = warm is not None and (colour_flicker >= INVISIBLE_COLOUR
                                        or white_balance not in ("steady", "smooth"))
     if not fix_light and not fix_colour:
@@ -183,6 +192,8 @@ def refine(
             entry["applied_temp"] = round(float(at), 3)
     write_ledger(seq.folder, ledger)
     record = {"render": render.round(5).tolist(), "applied": applied.round(5).tolist()}
+    if fix_light:
+        record["strength"] = np.round(strength, 4).tolist()
     if warm is not None:
         record.update(warmth=warm.round(5).tolist(), applied_temp=applied_t.round(4).tolist())
     if colour_target is not None and white_balance != "steady":
@@ -293,6 +304,23 @@ def _slider_strength(seq, render, applied, base, history, raw_light, window) -> 
                 ratio = np.full(len(render), np.nan)
                 ratio[ok] = (render[ok] - prev_render[ok]) / moved[ok]
                 return _local(ratio, window)
+        # Exposure barely moved since the last export (e.g. a colour-only pass):
+        # any brightness change came from something else, so it can't teach us
+        # the slider. Reuse what an earlier pass learned.
+        for record in reversed(history):
+            if len(record.get("strength") or []) == len(render):
+                return np.array(record["strength"], dtype=np.float64)
+        # Or learn it again from the last two earlier passes where Exposure did move.
+        for older, newer in zip(reversed(history[:-1]), reversed(history[1:])):
+            r0, a0 = np.array(older["render"]), np.array(older["applied"])
+            r1, a1 = np.array(newer["render"]), np.array(newer["applied"])
+            if len(r0) == len(r1) == len(render):
+                moved = a1 - a0
+                ok = np.abs(moved) > 0.02
+                if ok.sum() >= 10:
+                    ratio = np.full(len(render), np.nan)
+                    ratio[ok] = (r1[ok] - r0[ok]) / moved[ok]
+                    return _local(ratio, window)
 
     # First pass: how the render tracks the RAW and the corrections, frame to frame.
     raw, _ = raw_light()
