@@ -187,12 +187,27 @@ def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:
                 return rgb, warmth_of(rgb)  # fast: preview colour, after the camera's white balance
 
         warmth = _sensor_warmth(raw)
+        # Every frame must be scaled the same way, or the measurement invents
+        # flicker. Two LibRaw defaults don't do that:
+        # - adjust_maximum_thr (0.75): if a frame's brightest pixel is above
+        #   75% of the sensor's white level, LibRaw treats that pixel as white
+        #   for that frame only. A glint at 78% brightened a whole frame by
+        #   +0.36 stops on a real R6 sequence whose light was steady.
+        # - the camera's own white balance, which changes frame to frame on
+        #   Auto WB and leaks into brightness.
+        # So: the sensor's fixed white level, and one fixed white balance.
+        fixed_wb = [float(v) for v in list(getattr(raw, "daylight_whitebalance", []))[:3]]
+        if len(fixed_wb) < 3 or min(fixed_wb) <= 0:
+            fixed_wb = [1.0, 1.0, 1.0]
         rgb = raw.postprocess(
             half_size=True,
             gamma=(1, 1),
             no_auto_bright=True,
             output_bps=16,
-            use_camera_wb=True,
+            adjust_maximum_thr=0.0,
+            use_camera_wb=False,
+            use_auto_wb=False,
+            user_wb=fixed_wb + [fixed_wb[1]],   # R, G, B, second G
             output_color=rawpy.ColorSpace.sRGB,
             user_flip=0,
         )
