@@ -33,7 +33,7 @@ timelapse finish   ~/Pictures/sunset-export --video sunset.mp4   # 3. last wobbl
 ## Install
 
 ```bash
-pip install "harbium-timelapse[raw] @ git+https://github.com/[[ username ]]/harbium-timelapse"
+pip install "harbium-timelapse[raw] @ git+https://github.com/TheDingusBingus/harbium-timelapse"
 ```
 
 Also install [ExifTool](https://exiftool.org) (camera settings; needed for Canon CR3) and [ffmpeg](https://ffmpeg.org) (videos). Both are free. For 16-bit TIFF exports, use `harbium-timelapse[raw,tiff]`.
