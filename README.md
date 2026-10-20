@@ -2,6 +2,14 @@
 
 A free, open-source tool for cleaning up timelapses. It takes the flicker out of a sequence and stops the white balance jumping around between frames, and it's designed to fit around the photo editor you already use. I built it for my own work as a lighter, free alternative to LRTimelapse, and I'm sharing it in case it's useful to anyone else.
 
+## Left: straight out of the editor. Right: using harbium-timelapse
+
+https://github.com/user-attachments/assets/44b26f32-7309-4671-a73f-376aaa684f92
+
+
+
+
+
 It's very much a work in progress. So far it has been tested properly on one real sequence: 229 frames from a Canon R6, shot from late afternoon into night, with a variable ND filter being turned, a few ISO changes, people walking through and car light trails, edited in RapidRAW on Windows. The finished video looked smooth, and measured smooth as well. I'd like to try it on plenty more footage before claiming much beyond that, so if you give it a go, I'd love to hear how you get on.
 
 ## How it works in practice
