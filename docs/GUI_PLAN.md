@@ -233,7 +233,7 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 | ID | Requirement | Stories |
 |---|---|---|
 | FR-14 | The timeline shows the measured light, the smoothing curve and the corrected result for brightness, with colour balance on a second track, from the report. | US-12 |
-| FR-15 | The spike check flags frames that break away from both neighbours by more than a visible amount; ramps aren't flagged; the outermost frames are "can't judge". (library) | US-13 |
+| FR-15 | The spike check flags frames that break away from both neighbours by more than a visible amount, measured as the distance from the midpoint of the two neighbouring frames: a ramp passes through that midpoint however steep it is, a spike doesn't. (Found in the mockup: the simpler "jumps one way, then back" rule missed a real spike on the steep part of nightfall.) The outermost frames are "can't judge". (library) | US-13 |
 | FR-16 | Clicking a frame opens the frame viewer: previous, current and next frame, before/after toggle, blink comparison, "looks fine". | US-14 |
 | FR-17 | The smoothness setting re-plans from cached measurements without re-reading frames, and redraws the curve. | US-15 |
 | FR-18 | "Apply changes" re-runs only the writing step with the new plan. | US-15 |
