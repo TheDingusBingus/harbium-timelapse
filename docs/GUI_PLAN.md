@@ -35,16 +35,16 @@ The app is a thin layer over the library that already exists. Every piece of ima
 
 The app is built around one guided flow (pick a folder, prepare, grade in your editor, finish, review) with the review screen as its centrepiece: a timeline of the light across the sequence, the smoothing curve drawn over it, flagged frames marked on it, and the frames themselves one click away.
 
-Flet looks like a good fit, but it reached 1.0 only in September 2026, and three things need proving before committing: that a packaged Flet app can bundle our compiled libraries and helper programs, that background work runs properly inside a packaged app, and that it can show frames quickly enough for scrubbing and preview. Those are the first experiments (section 18). If any of them fails badly, the design still holds: only the screen layer would change, to Qt.
+Flet looks like a good fit, but it reached 1.0 only in September 2026, so a few things need proving before committing: that a packaged Flet app can bundle our compiled libraries and helper programs, that worker processes behave in a packaged app (supported since Flet 0.86, but to be confirmed with our code), and that it can show frames quickly enough for scrubbing and preview. Those are the first experiments (section 18). If any of them fails badly, the design still holds: only the screen layer would change, to Qt.
 
-Decisions I need from you, roughly in the order they matter:
+Decisions, as agreed on 20 October 2026:
 
-1. **Code signing.** Without a code-signing certificate, Windows shows a "Windows protected your PC" warning the first time anyone runs the app. A certificate costs money every year. Do you want to buy one for the first public release, or ship unsigned at first with clear instructions?
-2. **How video is encoded in the bundled app.** The usual ffmpeg builds that make H.264 video are GPL-licensed. Bundling one is generally fine as a separate program, but it comes with obligations (offering the ffmpeg source, keeping it a separate program). The alternative is a more limited build. This needs a short check with someone who knows licensing (section 13).
-3. **Mac.** Windows first is assumed. Is a Mac version wanted in the first public release, or later? It needs a Mac to build on and Apple's notarisation.
-4. **Updates.** I recommend no automatic updates at first, just an optional "check for a new version" that opens the GitHub release page. OK?
-5. **Telemetry.** I recommend none at all: the app never sends anything anywhere. OK?
-6. **A sample sequence.** Shipping a small sequence you own (under CC BY) inside the app lets new people try it in two minutes and gives us a public benchmark. Are you happy to provide one?
+1. **No code signing for now.** The first-run warning is handled with clear instructions and published checksums (section 13, "Releasing unsigned").
+2. **ffmpeg is bundled inside the app,** invisible to the user. Route: the GPL build with x264 as a separate program, unless experiment S7 shows Windows' own H.264 encoder is as good (section 13, "Bundling ffmpeg").
+3. **Windows is the supported platform.** Mac and Linux builds are published as experimental until people in the community test them.
+4. **No automatic updates.** An optional "Check for a new version" opens the GitHub release page.
+5. **No telemetry.** The app sends nothing anywhere unless the user asks.
+6. **A sample sequence** shot by James, released under CC BY, ships with the app and doubles as a public benchmark. Due in the coming weeks.
 
 ---
 
@@ -55,7 +55,7 @@ What exists today: a tested Python library (about 5,300 lines, 237 tests) with t
 Constraints that shape the plan:
 
 - **One developer, plus me.** The design has to stay small enough to maintain. Fewer moving parts beats cleverness.
-- **Windows first.** It's your platform and most of the audience's. Nothing should rule out Mac and Linux later.
+- **Windows first.** Windows is the supported platform. Mac and Linux builds are published as experimental until people in the community test them, so nothing in the design may rule them out.
 - **Offline.** Photographers work on laptops in the field and on locked-down machines. The app must do everything without an internet connection.
 - **Big data on slow drives.** A typical sequence is 200 to 2,000 RAW files of 20 to 60 MB each, often on an external drive. Reading them is the slowest part of everything.
 - **The library stays the source of truth.** The command line keeps working and keeps full feature parity; anything the app can do, a script can do.
@@ -190,7 +190,7 @@ For the first public release of the app.
 |---|---|
 | **Must** | Installer with ExifTool and ffmpeg bundled (US-1). Open a folder by drag or button (US-2). Plain-English folder check (US-3). Prepare with preview-before-apply, progress and cancel (US-5, US-6). Undo (US-8). Editor-specific hand-off steps for RapidRAW and Lightroom (US-7, US-9). Finish with simple video settings (US-10). Timeline of the light with the smoothing curve (US-12). Spike-based flags on the timeline (US-13). Crash and disconnect recovery (US-17). Works fully offline, sends nothing. |
 | **Should** | Frame viewer with neighbours, before/after and blink (US-14). Smoothness slider with instant redraw (US-15). Remember projects and their stage (US-9). Auto-find the export folder (US-11). Diagnostics bundle (US-18). Detect a moving camera and warn (US-20). Keyboard shortcuts for the review screen. |
-| **Could** | In-app film preview (US-16). Built-in sample sequence (US-4). Optional "check for a new version". Keyframe suggestions shown on the timeline. Mac build. Light theme. |
+| **Could** | In-app film preview (US-16). Built-in sample sequence (US-4). Optional "check for a new version". Keyframe suggestions shown on the timeline. Experimental Mac and Linux builds. Light theme. |
 | **Won't (this release)** | Hyperlapse support. Editing the look inside the app. Batch processing of several sequences at once. Mobile or web versions. Automatic updates. Any account, login or cloud feature. |
 
 ---
@@ -689,7 +689,7 @@ class JobHandle:
 
 Jobs run in a separate worker process, not in the window's process. That keeps the window responsive whatever the job does, keeps a crash in a RAW decoder from taking the window down, and lets Cancel stop a job by force if it doesn't respond. Events come back over a queue; one small thread in the window process reads the queue and hands each event to the Flet event loop (`page.run_thread` / pubsub), which is the only place screens are updated. Progress events are throttled to about ten a second so the screen never floods.
 
-Whether a packaged Flet app can start worker processes at all is the biggest unknown in this plan (section 14, experiment S2). If it can't, the same `JobRunner` interface runs jobs in a thread instead, and the library's decoding (numpy, LibRaw) does most of its work outside Python's lock, so multi-core speed is mostly kept. Nothing above the runner changes either way.
+Packaged Flet apps support worker processes since version 0.86 (section 14); experiment S2 confirms it with our code. If something about our libraries misbehaves there, the same `JobRunner` interface runs jobs in a thread instead, and the library's decoding (numpy, LibRaw) does most of its work outside Python's lock, so multi-core speed is mostly kept. Nothing above the runner changes either way.
 
 **Run reports** (library). The contract between the work and anything that shows it. A versioned JSON file written by `prepare` and `finish`, read by the app, and useful from the command line and in bug reports:
 
@@ -793,21 +793,52 @@ The user's photographs and edits (integrity), their machine (not becoming a way 
 | **A malicious edit file or report** (XMP, `.rrdata`, `project.json`, a report) crafted to make the app write somewhere else or run something. | Parse only as data (JSON and byte-level XMP, as now; never `pickle` or `eval` anything from disk). Store paths relative to the project folder and refuse any that leave it (`..`, absolute paths, drive letters). Validate schema and version before use. Treat everything in these files as untrusted text when displayed. |
 | **Command injection through file names** when running ExifTool and ffmpeg. | Already handled: absolute paths, no shell, arguments as a list, and tests for file names that start with a dash. Keep it that way; the app adds no new ways of running programs. |
 | **Program or DLL planting**: a file in the working folder or on PATH pretending to be ExifTool or ffmpeg. | The packaged app runs only its own bundled copies by absolute path inside the install folder, never from PATH or the current folder. Install per user into a folder others can't write to. |
-| **The local connection between Python and Flutter.** On Windows, a Flet desktop app talks to its own window over a local TCP port. Another program on the same machine could try to connect to it. | Verify in experiment S6 that it listens only on the local loopback address and can't be reached from the network. Never ship "web mode". Treat this as a same-machine risk: if malware is already running as the user, it can do worse things anyway. Recheck after every Flet upgrade. |
-| **Tampered downloads or bundled programs.** | Pin exact versions of ExifTool and ffmpeg with checksums in the build; build releases in GitHub's build service from tagged source; publish checksums of the installer; sign the installer if we buy a certificate (decision 1). |
+| **The local connection between Python and Flutter.** Older Flet desktop apps talked to their window over a local TCP port on Windows, which another program on the same machine could try to reach. | Since Flet 0.86, packaged apps embed Python inside the app and talk to the window in-process, with no network port. The port only exists during development (`flet run`). Experiment S6 confirms the packaged app opens no listening port; recheck after every Flet upgrade. Never ship "web mode". |
+| **Tampered downloads or bundled programs.** | Pin exact versions of ExifTool and ffmpeg with checksums in the build; build releases in GitHub's build service from tagged source; publish checksums of the installer; publish checksums and GitHub build provenance with every release (the app is released unsigned for now; see "Releasing unsigned"). |
 | **Supply chain**: a compromised Python package or Flet release. | Lock file with hashes for every dependency; upgrade deliberately, not automatically; read the changelog of Flet upgrades before taking them; keep a software bill of materials with each release. |
 | **Updates as an attack route.** | No automatic updates. "Check for a new version" only reads the GitHub releases page over HTTPS and opens the browser; it never downloads or runs anything. |
 | **Privacy leaks.** | No telemetry, no network by default (QR-9). Diagnostics bundles shorten paths to folder names, leave out camera serial numbers and GPS, include no image data, and are shown to the user before saving. |
 | **Two copies of the app, or the app and the command line, writing the same folder.** | The existing per-folder lock already prevents it; the app shows "this folder is busy" instead of an error. |
 
+### Bundling ffmpeg
+
+The aim is that nobody ever has to know ffmpeg exists. The installer puts `ffmpeg.exe` inside the app's own folder, the app runs it by absolute path, a first-run check confirms it works, and the about screen lists its licence. No download on first use (that would break offline use), no asking people to install it, and no settings to find it. Power users can point the app at their own ffmpeg in settings if they want to.
+
+The only real choice is which build, because it decides the video encoder:
+
+| | GPL build (with x264) | LGPL build (Windows' own encoder, `h264_mf`) |
+|---|---|---|
+| Video quality | x264: the reference H.264 encoder, very good at any bitrate | Depends on the PC: uses the graphics chip's encoder when there is one, Microsoft's software encoder otherwise |
+| Same result on every PC | Yes | No: Intel, NVIDIA and AMD encoders all differ |
+| Needs careful settings | No (one quality setting) | Yes: bitrate and profile must be set explicitly, or it can default to a very low bitrate and the basic profile |
+| Speed | Good on the processor | Fast where hardware encoding exists |
+| Licence obligations | Make the matching ffmpeg source available with each release, include its licence, keep it a separate program | Include its licence; much lighter |
+| Also available | ProRes, PNG, TIFF, and everything else in ffmpeg | ProRes, PNG, TIFF; no x264 or x265 |
+
+Recommendation: **the GPL build, as a separate program**, which is a common and widely accepted arrangement for MIT apps that call ffmpeg. The source obligation is automated in the release build: the build downloads the exact source archive for the ffmpeg version it bundles and attaches it to the GitHub release, with a note in the licences screen. Experiment S7 encodes the dusk sequence both ways and compares them; if Windows' own encoder turns out to be just as good at matched sizes on typical hardware, the LGPL build becomes the simpler choice. Either way, offering ProRes as an option is worthwhile for people who cut the film in a video editor.
+
+Later optimisation: a trimmed ffmpeg build containing only what the app uses (the H.264 and ProRes encoders, image decoders and the scale filter) would be much smaller than the full builds, with a smaller attack surface. It needs its own build pipeline, so it's a Phase 5 item.
+
+This is the plan as I understand the licences, not legal advice; a short check with someone who knows open-source licensing before the first release is still worthwhile.
+
+### Releasing unsigned
+
+Without code signing, Windows SmartScreen shows "Windows protected your PC" when someone runs the installer, until the app builds a download reputation. To keep that from losing people:
+
+- The download page and README show the warning with a screenshot and the two clicks past it ("More info", then "Run anyway"), and say why it appears.
+- Every release publishes SHA-256 checksums of the installer, so careful users can verify it.
+- Releases are built only in GitHub's build service from a tagged commit, with GitHub's build provenance (artifact attestations) attached, so anyone can check where an installer came from.
+- Worth revisiting once there are users: some services offer free code signing to open-source projects, and low-cost signing services exist; both are worth checking before buying a certificate.
+- Experimental Mac builds will be blocked by Gatekeeper until notarised; the experimental download notes explain how to open them anyway.
+
 ### Licences of what we bundle
 
 Not a security issue, but a compliance one that has to be right before release:
 
-- **ffmpeg**: builds that encode H.264 with x264 are GPL. Bundling a GPL ffmpeg as a separate program next to an MIT app is a common, generally accepted arrangement, but it carries obligations (make the matching ffmpeg source available, keep it a separate program, include its licence). An LGPL build avoids most of that but can't use x264. Needs a short check with someone who knows licensing (decision 2).
+- **ffmpeg**: see "Bundling ffmpeg" above.
 - **ExifTool**: Perl's licence (Artistic or GPL); fine to bundle with its licence included.
 - **LibRaw** (inside rawpy): LGPL or CDDL; fine as the shared library rawpy ships.
-- **Flet** (Apache 2.0) and **Flutter** (BSD): fine. **flet-video** uses media_kit and libmpv, which need their own licence check if the in-app player uses them.
+- **Flet** (Apache 2.0) and **Flutter** (BSD): fine. **flet-video** uses media_kit and libmpv, which need their own licence check if the in-app player uses them. A drag-and-drop extension (section 14) needs its licence checked too.
 - **Font**: Atkinson Hyperlegible is under the SIL Open Font Licence; fine to bundle.
 
 The about screen lists all of them (FR-23).
@@ -816,23 +847,45 @@ The about screen lists all of them (FR-23).
 
 ## 14. Risks of building on Flet
 
-Flet is attractive: the whole app stays in Python, it looks modern, it's permissively licensed, and it reached a stable 1.0 in September 2026 with tests across platforms. The risks are real but testable, and the architecture keeps an exit open.
+Flet is attractive: the whole app stays in Python, it looks modern, it's permissively licensed (Apache 2.0), and it reached a stable 1.0 on 15 September 2026, with tests across platforms. This section records what research in October 2026 found, then the risks that remain.
+
+### What the research found
+
+**Things that were risks and are now largely solved (to be confirmed in the experiments):**
+
+- **Worker processes in packaged apps.** Until Flet 0.86 (July 2026), a worker process started from a packaged app relaunched the whole app, opening extra windows and hanging (Flet issues 4283 and 4252). Since 0.86, multiprocessing (`Process`, `ProcessPoolExecutor`, spawn) works in packaged Windows, macOS and Linux apps: the app recognises a worker's command line and runs it as a windowless Python interpreter. The conditions match how our code is written already: the entry point guarded by `if __name__ == "__main__":`, worker functions at module top level, no Flet objects in workers. (Flet 0.86 release notes; Flet's multiprocessing cookbook page.)
+- **The local network port.** Since 0.86, packaged apps embed Python in-process and talk to the window through a direct bridge, not a localhost socket. The port only exists in development.
+- **Showing frames fast.** Flet's `RawImage` control streams pixels from numpy or Pillow straight to a GPU texture, skipping encoding and the normal message protocol; it's meant for animations and camera frames at interactive frame rates. That fits the preview player and the blink comparison. Static frames from the preview cache use the ordinary `Image` control by file path.
+- **Testing the packaged app.** `flet test` runs pytest integration tests against the packaged app (tap buttons, enter text, check flows), which suits the release smoke test.
+
+**Limitations to design around:**
+
+- **Event handlers run on the app's event loop in 1.0.** In 0.x, ordinary event handlers ran in separate threads; in 1.0 they run on the event loop, so any slow work inside a handler freezes the window. Our design already keeps all slow work in jobs; the rule becomes absolute: handlers only start jobs and update state.
+- **Performance depends on how often and how much you redraw.** Developers building larger Flet apps (a workflow tool with some video editing, node and mind-map editors) report it's fine for most apps once updates are throttled and kept small in scope, but not for "frame-level" native performance, and that some controls lack throttling of their own. Our design throttles job progress to about ten updates a second and keeps redraws local; the timeline and player are where this is tested (S3, S4, S5).
+- **No built-in drag-and-drop from Explorer.** Flet's own drag-and-drop works between controls inside the app. Dropping files or folders from the operating system needs a community extension wrapping the Flutter `desktop_drop` package (flet-dropzone or flet-desktop-drop). These are small third-party projects that must keep pace with Flet 1.x; the "Choose folder" button stays the main route and drag-and-drop is a bonus.
+- **Local images are cached by path.** If a file changes but keeps its name, an `Image` may keep showing the old one. Preview files therefore get names that change whenever their content does (the file stamp in the name).
+- **`flet build` makes a folder, not an installer.** The output is an `.exe` with its DLLs and data. An installer has to be made from it separately; Inno Setup is a common choice, already used by at least one published Flet app.
+- **Building needs Windows with Visual Studio 2022 (C++ workload) and Developer Mode.** Release builds come from GitHub's Windows build machines, set up once in a script.
+- **Churn right up to 1.0.** 0.86 (July 2026) changed packaging substantially (read-only app bundle, storage folders reworked, bytecode compiled by default, Python 3.14 by default), and 1.0 (September) changed the execution model and deprecated `ft.app()` for `ft.run()`. Much of what's online is for older versions.
+
+**Who uses it for similar work:** the closest published apps are small: a batch image and audio converter (Pillow, ffmpeg, with a Windows `.exe`), a passport-photo tool, a background-removal app. None is an image-heavy professional tool on the scale of this one, so we'd be among its more demanding users. Community sentiment around 1.0 is positive about the API and the "Python only" promise, with long-term maintenance and keeping up with Python and native dependency versions as the common worry.
+
+### Risks that remain
 
 | Risk | Why it matters | How we find out or reduce it |
 |---|---|---|
-| **Young 1.0, long history of breaking changes before it.** | Upgrades could break the app; documentation and examples online are often for old versions. | Pin the exact Flet version; upgrade on purpose with the app's tests and a manual check; keep Flet code in the screen layer only. |
+| **Young 1.0, a lot of change just before it.** | Upgrades could break the app; examples online are often for old versions. | Pin the exact Flet version; upgrade on purpose with the app's tests and `flet test`; read release notes first; keep Flet code in the screen layer only. |
 | **Small team behind it.** | If development slowed, we'd be on our own. | The exit plan below; nothing outside the screen layer depends on Flet. |
-| **Worker processes inside a packaged app.** In a packaged Flet app, Python runs embedded inside the Flutter program rather than as `python.exe`. Starting worker processes normally needs a Python program to launch. | Without workers, long jobs would compete with the window for Python's lock, and a decoder crash could take the window down. | Experiment S2. Fallbacks in order: ship a separate small worker program inside the app; run jobs in threads (decoding mostly runs outside Python's lock, so speed is mostly kept). The `JobRunner` interface hides which one is used. |
-| **Packaging compiled libraries and helper programs.** numpy, rawpy (with LibRaw), Pillow, plus ExifTool and ffmpeg must all end up inside the installer and work. | If they can't, there's no installer. | Experiment S1, on a clean Windows machine with no Python. |
-| **Building needs a Windows machine with Visual Studio 2022 and Developer Mode.** | Release builds can't come from a Mac or Linux machine. | Build releases on GitHub's Windows build machines, where this setup is scripted once. |
-| **Moving images between Python and the window.** The window is drawn by a separate Flutter program; every image has to cross over. | Scrubbing and preview could stutter if frames are sent as big encoded strings. | Show images by file path from the preview cache, keep them small (about 960 px), preload neighbours. Experiment S3 measures it against QR-6. |
-| **Charts with thousands of points.** | A slow timeline would undermine the centrepiece. | Thin each series to about two points per screen pixel (keeping the highs and lows) before drawing. Experiment S4. |
-| **Video playback** relies on an extension built on libmpv. | Adds size and a licence question. | The player can show preview images in sequence instead (no extra component). Experiment S5 decides which. |
-| **Keyboard handling and accessibility.** Flet has one page-level keyboard handler, and accessibility depends on Flutter's screen-reader support. | Shortcuts could clash with text fields; screen-reader users could be shut out. | Route shortcuts through one dispatcher that ignores keys while a text field has focus; test with Windows Narrator in experiment S6. |
-| **Drag and drop of folders from Explorer.** | It's the most natural way to open a sequence. | Experiment S6; the "Choose folder" button is the fallback, so it's never a blocker. |
-| **Antivirus false alarms.** Packaged Python apps are sometimes flagged by antivirus heuristics. | A scary warning loses Tom immediately. | Code signing (decision 1) helps most; submit releases to Microsoft for analysis if flagged; test with Windows Defender on every release. |
+| **Worker processes, confirmed with our code.** Supported since 0.86, but not yet tried with rawpy, numpy and our parallel reader. | If it misbehaved, long jobs would compete with the window. | Experiment S2. Fallback: threads behind the same `JobRunner` interface (decoding mostly runs outside Python's lock). |
+| **Packaging compiled libraries and helper programs.** | No installer without it. | Experiment S1 on a clean Windows machine with no Python. |
+| **Frame display speed.** | Scrubbing and preview could stutter. | `Image` by file path for stills, `RawImage` for playback and blink; experiment S3 measures both against QR-6. |
+| **Charts with thousands of points.** | A slow timeline undermines the centrepiece. | Thin each series to the screen's width, keeping highs and lows; experiment S4. If flet-charts is too slow, draw the timeline on a canvas or render it with `RawImage`. |
+| **Video playback** via flet-video (media_kit, libmpv). | Adds size and a licence question. | Prefer `RawImage` playback of preview images (no extra component); experiment S5. |
+| **Drag-and-drop depends on a community extension.** | It could lag behind Flet releases. | Treat it as optional; the button is the main route. Experiment S6. |
+| **Keyboard handling and accessibility.** One page-level keyboard handler; accessibility depends on Flutter's screen-reader support. | Shortcuts could clash with text fields; screen-reader users could be shut out. | One shortcut dispatcher that ignores keys while a text field has focus; test with Windows Narrator in S6. |
+| **Antivirus false alarms on unsigned packaged apps.** | A scary warning loses beginners. | Build provenance and checksums; submit flagged releases to Microsoft for analysis; test with Windows Defender on every release. |
 
-**The exit plan.** If Flet fails experiments S1 to S3 badly, the fallback is PySide6 (Qt for Python): mature, accessible, with excellent image and chart performance, and LGPL-licensed. Because view models are plain Python and screens only draw them, switching would mean rewriting the screens (roughly a fifth of the app's code), not the app.
+**The exit plan.** If Flet fails experiments S1 to S3 badly, the fallback is PySide6 (Qt for Python): mature, accessible, with excellent image and chart performance, LGPL-licensed, and well-trodden packaging (PyInstaller, Nuitka). Because view models are plain Python and screens only draw them, switching would mean rewriting the screens (roughly a fifth of the app's code), not the app.
 
 ---
 
@@ -848,6 +901,18 @@ The budgets are in section 7. These are the techniques that meet them, most impo
 6. **Keep the computer awake during long jobs** (Windows `SetThreadExecutionState`, macOS power assertions) and release it straight after, so an overnight finish doesn't stop at the screensaver.
 7. **Check space before writing.** Estimate output size (frames x average size, plus the video) and refuse with a clear message if the drive would fill, instead of failing halfway.
 8. **Cache housekeeping.** Caches have a size limit (default 5 GB, adjustable) and are cleared oldest first; a "Clear caches" button exists in settings.
+
+### Reading from slow drives
+
+The first time a folder is opened, reading camera settings for 229 CR3 files took about three minutes on James's external drive. Measured in October 2026: ExifTool's own processing costs about 0.03 seconds per file once it's loaded (around 7 seconds for 229 files), so nearly all of those three minutes is waiting for the drive, or something between the drive and ExifTool such as antivirus scanning each file as it's opened. ExifTool's `-fast` option made no measurable difference to that processing.
+
+So the speed-up depends on the drive, and is decided by measuring rather than assuming:
+
+- **SSDs** (internal or USB) serve many requests at once, so running several ExifTool processes in parallel should help.
+- **Spinning hard drives** serve one request at a time; parallel reading can make them slower as the read head jumps between files.
+- **Antivirus** scanning shows up as every kind of read being slow; the fix is advice (excluding the photo folder from real-time scanning is the user's choice), not code.
+
+`benchmarks/reading_speed.py` measures all of this on a real drive, each method on its own untouched files: ExifTool as now, with `-fast`, four in parallel, and plain reads of the start and of whole files, one at a time and four at once. The result decides the default (experiment S8). Whatever it shows, two things help everywhere: the settings cache (done) makes every later open instant, and the app shows the project as soon as the first settings arrive, filling in the rest as they come, rather than waiting for all of them. In the app, the settings read and the preview-image pass also become one background job that reads each file once, in order.
 
 What we'd revisit as sequences grow: beyond about 5,000 frames, the timeline should switch to a zoomable view, and the measurement cache should become a small database instead of one file per project.
 
@@ -915,13 +980,15 @@ Done when: all tests pass, `finish` writes a report, and your dusk sequence's re
 | | Experiment | Passes when |
 |---|---|---|
 | S1 | Package a minimal app with numpy, rawpy, Pillow, ExifTool and ffmpeg; install on a clean Windows machine with no Python | It opens a CR3, reads its settings and writes a video |
-| S2 | Start worker processes from the packaged app; cancel and force-stop one | Workers run on all cores and a forced stop leaves no stray process; otherwise the thread fallback is measured |
-| S3 | Step through 2,000 preview images in a Flet image control | Each frame shows within 100 ms (QR-6) |
-| S4 | Draw a 2,000-point timeline with three layers and drag a slider | Redraw under 150 ms (QR-4) |
-| S5 | Play 229 preview images at 24 frames a second; compare with the video extension | Smooth playback with one of the two approaches |
-| S6 | Drag a folder from Explorer; keyboard-only use; Windows Narrator; confirm the local connection only listens on loopback | All work, or have an acceptable fallback |
+| S2 | Run our parallel reader and a job worker from the packaged app (supported since Flet 0.86); cancel and force-stop a job | Workers run on all cores, a forced stop leaves no stray process, and no extra windows appear |
+| S3 | Step through 2,000 preview images two ways: `Image` by file path, and `RawImage` fed from numpy | Each frame shows within 100 ms (QR-6) with at least one of them |
+| S4 | Draw a 2,000-point timeline with three layers and drag a slider (flet-charts, then canvas if needed) | Redraw under 150 ms (QR-4) |
+| S5 | Play 229 preview images at 24 frames a second with `RawImage`; compare with flet-video | Smooth playback with one of the two |
+| S6 | Folder drop from Explorer with a community extension; keyboard-only use; Windows Narrator; confirm the packaged app opens no listening network port | All work, or have an acceptable fallback |
+| S7 | Encode the dusk sequence with x264 (GPL build) and with Windows' own encoder (LGPL build) at matched file sizes; compare by eye and by measured quality | Decides which ffmpeg build to bundle |
+| S8 | Run `benchmarks/reading_speed.py` on real drives: James's external drive, an internal SSD, a USB SSD | Decides whether parallel ExifTool is the default, and for which drives |
 
-**Decision gate:** go with Flet if S1 and S2 pass (S2 with either workers or threads) and S3 and S4 meet their budgets. Otherwise, the same experiments with PySide6, then decide.
+**Decision gate:** go with Flet if S1 and S2 pass (S2 with either workers or threads) and S3 and S4 meet their budgets. Otherwise, the same experiments with PySide6, then decide. S7 and S8 don't affect the framework choice; they set defaults.
 
 ### Phase 2: the first working app
 
@@ -937,19 +1004,19 @@ Done when: first round of usability sessions, and the issues found are fixed.
 
 ### Phase 4: the installer and release
 
-Packaged Windows installer with everything bundled, signing (if decided), the self-test in the release build, licences screen, diagnostics bundle, sample sequence, documentation, and a release checklist.
+Packaged Windows installer (`flet build windows` wrapped by Inno Setup) with everything bundled, the self-test in the release build (`flet test`), checksums and build provenance on every release, the ffmpeg source archive attached automatically, the "Run anyway" instructions, licences screen, diagnostics bundle, sample sequence, documentation, and a release checklist. Experimental Mac and Linux builds from the same pipeline, clearly labelled.
 
 Done when: a person who's never seen the tool installs it from the GitHub release page and makes a video, on a machine with no Python.
 
 ### Phase 5: polish and widen
 
-Second usability round, light theme, Mac build (if decided), then the "Could" items by demand.
+Second usability round, light theme, Mac and Linux out of "experimental" once community testers confirm them, a trimmed ffmpeg build, then the "Could" items by demand.
 
 ---
 
 ## 19. Things that are easy to miss
 
-- **Windows' first-run warning.** Without code signing, SmartScreen warns about the app until it builds a reputation. Decide early (decision 1); it affects the first impression more than any feature.
+- **Windows' first-run warning.** Releasing unsigned (decision 1) means SmartScreen warns about the app until it builds a reputation. The download page has to prepare people for it (section 13, "Releasing unsigned"); it affects the first impression more than any feature.
 - **Long file paths on Windows.** Paths over 260 characters still break some tools. The backup copies inside `.timelapse-core/originals/` make long paths longer; the app should warn before it happens rather than fail.
 - **Drives that disappear.** External drives get unplugged and network drives drop out. Every job must treat "file vanished" as a normal, explained event, and recovery must work afterwards.
 - **Sleep and laptops on battery.** Long jobs should keep the machine awake while running, and warn on battery power before a long finish.
@@ -1004,7 +1071,7 @@ Second usability round, light theme, Mac build (if decided), then the "Could" it
 
 ### ADR-003: long jobs run in a worker process
 
-**Status:** Proposed, depends on experiment S2.
+**Status:** Proposed. Multiprocessing in packaged Flet apps is supported since 0.86; experiment S2 confirms it with our code.
 
 **Context.** Measuring and writing take minutes, decoders can crash on bad files, and Cancel has to work even if a job is stuck.
 
