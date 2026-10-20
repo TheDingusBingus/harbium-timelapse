@@ -88,3 +88,11 @@ def test_prepare_without_editor_files_explains_the_alternative(tmp_path, capsys)
     assert cli.main(["prepare", str(tmp_path)]) == 1
     err = capsys.readouterr().err
     assert "No edit files" in err and "timelapse finish" in err
+
+
+def test_a_refusal_says_what_the_problem_is(folder, capsys):
+    path, _ = folder
+    (path / "181A1003.JPG").write_bytes(b"\xff\xd8\xff")             # RAW and JPEG mixed
+    assert cli.main(["prepare", str(path)]) == 1
+    err = capsys.readouterr().err
+    assert "mixes file types" in err and "Not changing anything" in err

@@ -9,7 +9,7 @@ You don't need an adapter to use the tool with your editor: grade, export every 
 | Editor | Edit files | Status |
 |---|---|---|
 | RapidRAW | `<photo>.rrdata` (JSON) | Built in: white balance (exact Kelvin and tint) and exposure |
-| Lightroom Classic / Camera Raw | `<photo>.xmp` (`crs:` tags) | Planned next |
+| Lightroom Classic / Camera Raw | `<photo>.xmp` (`crs:` tags) | Built in, experimental: exposure only, not yet tested inside Lightroom ([LIGHTROOM.md](LIGHTROOM.md)) |
 | RawTherapee / ART | `<photo>.pp3` (INI) | Planned |
 | darktable | `<photo>.xmp` (history stack) | Planned |
 
@@ -76,4 +76,4 @@ These come from real failures found while building the RapidRAW adapter. The sha
 - Whether the editor writes edit files for every photo, or only edited ones (users may need to paste one edit onto all frames first).
 - How white balance is stored: Kelvin and tint on whose scale? `colour_temperature.py` converts camera neutrals to the standard DNG/Adobe-style scale; check the editor's own readout against it on a real frame.
 
-`editors/rapidraw/` is the reference implementation, and `docs/RAPIDRAW.md` describes what was verified there.
+`editors/rapidraw/` is the reference implementation, and `docs/RAPIDRAW.md` describes what was verified there. `editors/lightroom/` is a smaller example that edits a text-based sidecar as raw bytes. The shared safety pieces (backups, the record kept in step, the folder lock, atomic writes) live in `editors/common.py`, ready for any new adapter.

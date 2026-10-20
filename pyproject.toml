@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 authors = [{ name = "James Harbour" }]
 requires-python = ">=3.10"
-keywords = ["timelapse", "deflicker", "photography", "raw", "white balance", "rapidraw"]
+keywords = ["timelapse", "deflicker", "photography", "raw", "white balance", "rapidraw", "lightroom"]
 dependencies = [
   "numpy>=1.24",
   "pillow>=10",
@@ -30,6 +30,7 @@ timelapse-rapidraw = "harbium_timelapse.editors.rapidraw.cli:main"
 # in this group; `timelapse prepare` then finds it automatically.
 [project.entry-points."harbium_timelapse.editors"]
 rapidraw = "harbium_timelapse.editors.rapidraw.adapter:RapidRAW"
+lightroom = "harbium_timelapse.editors.lightroom.adapter:Lightroom"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/harbium_timelapse"]

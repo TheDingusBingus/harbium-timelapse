@@ -35,8 +35,8 @@ class RapidRAW(Editor):
         report.problems = check(seq)
         blocking = [p for p in report.problems if p.kind in BLOCKING]
         if blocking and not force and not dry_run:
-            raise ValueError("Not changing anything until that's sorted: the results would be wrong. "
-                             "(If you're sure, add --force.)")
+            raise ValueError("\n".join(str(p) for p in blocking) + "\nNot changing anything until that's "
+                             "sorted: the results would be wrong. (If you're sure, add --force.)")
 
         if white_balance:
             try:

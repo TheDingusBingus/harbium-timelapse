@@ -20,7 +20,7 @@ Then grade and export the way you normally would. JPEG exports are fine.
 
 `finish` looks at the exported frames and smooths out any flicker or colour shift that's left, then makes a video. It can also write corrected frames if you'd rather put them together in a video editor. Because it works on the finished frames, it doesn't matter how your editor processes the image.
 
-If `prepare` doesn't support your editor yet, you can still use the tool: grade and export as usual, then run `finish`. The `prepare` step helps most when the exposure changes a lot during a shoot (an ND filter being turned, ISO steps), because it corrects things while the RAW files still have the most room. At the moment `prepare` supports RapidRAW, and `timelapse editors` shows what's available on your install.
+If `prepare` doesn't support your editor yet, you can still use the tool: grade and export as usual, then run `finish`. The `prepare` step helps most when the exposure changes a lot during a shoot (an ND filter being turned, ISO steps), because it corrects things while the RAW files still have the most room. At the moment `prepare` supports RapidRAW, and Lightroom on an experimental basis (see [docs/LIGHTROOM.md](docs/LIGHTROOM.md)). `timelapse editors` shows what's available on your install.
 
 ## Changing the look over time (keyframes)
 
@@ -102,12 +102,17 @@ One thing I found while testing: it's best to avoid the Dehaze slider on sequenc
 
 ## Adding another editor
 
-Support for each editor is a small plug-in, so new ones can be added without touching the rest of the tool. Lightroom and Camera Raw are next on my list. If you'd like to add one yourself, [docs/EDITORS.md](docs/EDITORS.md) explains how.
+Support for each editor is a small plug-in, so new ones can be added without touching the rest of the tool. RapidRAW and Lightroom are there so far, with RawTherapee and darktable on my list. If you'd like to add one yourself, [docs/EDITORS.md](docs/EDITORS.md) explains how.
+
+## Notes for Lightroom users
+
+Lightroom support is new and hasn't been tried inside Lightroom itself yet, so please treat it as experimental. It adds the deflicker to each frame's Exposure in the `.xmp` files, on top of your own edits, and leaves everything else in those files untouched. Because Lightroom keeps edits in its catalogue, you save the metadata to files first and read it back in afterwards; [docs/LIGHTROOM.md](docs/LIGHTROOM.md) walks through it. White balance isn't changed in Lightroom yet, so `timelapse finish` takes care of colour after export. If you try it, I'd love to know how it went.
 
 ## Plans
 
 - Testing on more footage: sunrises, fixed white balance, other cameras
-- Lightroom and Camera Raw support, then RawTherapee and darktable
+- Confirming Lightroom support with real Lightroom users, then white balance for Lightroom
+- RawTherapee and darktable support
 - A simple app with an installer, with ExifTool and ffmpeg included
 - Better handling of very large ND filter changes in `finish`
 - Motion blur between frames

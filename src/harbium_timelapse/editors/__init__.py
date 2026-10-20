@@ -14,8 +14,9 @@ __all__ = ["Editor", "PrepareReport", "available", "detect", "get"]
 
 def available() -> dict[str, type[Editor]]:
     """Every editor this installation knows, by command-line name."""
+    from .lightroom.adapter import Lightroom
     from .rapidraw.adapter import RapidRAW
-    found: dict[str, type[Editor]] = {RapidRAW.name: RapidRAW}
+    found: dict[str, type[Editor]] = {RapidRAW.name: RapidRAW, Lightroom.name: Lightroom}
     for ep in entry_points(group="harbium_timelapse.editors"):
         if ep.name in found:
             continue

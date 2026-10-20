@@ -18,14 +18,12 @@ Two defences:
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
 
 from harbium_timelapse import Sequence
 
 from .sidecar import (get_exposure, get_temperature, read_sidecar, set_exposure,
                       set_temperature, sidecar_path, write_sidecar)
+from ..common import running_programs
 from .state import STATE_DIR, clear_ledger, folder_lock, read_json, read_ledger, write_json, write_ledger
 
 REBUILD_COPY = "rapidraw.rebuild.json"
@@ -40,16 +38,8 @@ def rapidraw_running() -> bool:
     tool's own command, timelapse-rapidraw.exe, isn't mistaken for it. (It
     was, on the first real run on Windows.)
     """
-    try:
-        if sys.platform.startswith("win"):
-            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
-                                 text=True, timeout=10).stdout
-            names = [line.split('","')[0].strip('"') for line in out.splitlines() if line.strip()]
-        else:
-            out = subprocess.run(["ps", "-A", "-o", "comm="], capture_output=True,
-                                 text=True, timeout=10).stdout
-            names = [Path(line.strip()).name for line in out.splitlines() if line.strip()]
-    except (OSError, subprocess.SubprocessError):
+    names = running_programs()
+    if names is None:
         return False
     return any(is_rapidraw(name) for name in names)
 

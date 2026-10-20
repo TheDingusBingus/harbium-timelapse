@@ -235,3 +235,14 @@ timelapse-rapidraw restore "FOLDER"               :: everything back to before t
 - Still open: Windows long paths (>260 chars), detecting renamed frames between runs.
 
 **Structure:** one package `harbium-timelapse` (import `harbium_timelapse`), commands `timelapse` and `timelapse-rapidraw`. Editors are plug-ins: `harbium_timelapse.editors.Editor` (detect, is_running, load, prepare, undo) plus the `harbium_timelapse.editors` entry-point group; RapidRAW is the built-in reference adapter. New commands: `timelapse prepare | undo | editors`. The on-disk working folder stays `.timelapse-core` for compatibility with existing sequences. Guide: `docs/EDITORS.md`.
+
+
+---
+
+## Addendum 4 — 20 Oct 2026: Lightroom adapter (experimental)
+
+Built from James's real Lightroom Classic sidecars (Canon EOS 80D, 2024, Camera Raw 16.x, PV 15.4; files kept private, tests use a made-up XMP of the same shape). Findings: settings are attributes of the first `rdf:Description`; `crs:Exposure2012` occurs once there, formatted `0.00` / `+0.42` / `-1.20`; masks use `crs:LocalExposure2012`; files have 60k-character lines and a stray CR, so they're edited as bytes; copies such as `IMG_1273_1.xmp` belong to no photo. All sample files had a pasted Custom white balance (5250 K / +6), so Lightroom's per-frame as-shot readings weren't available: white balance is not written for Lightroom (its Kelvin scale comes from Adobe's DCP matrices; on the R6, ~240 K from rawler's at 3,500 K).
+
+Verified on copies of all 14 real files: only the exposure value changes; undo restores every file byte for byte; the orphan copy is never touched. Not verified: Lightroom reading the result back (no Lightroom available). Workflow: Save Metadata to Files → close Lightroom → `timelapse prepare` → Read Metadata from Files. DNG/JPEG/TIFF (settings inside the file) not supported.
+
+Refactor: generic safety machinery moved to `editors/common.py` (backups, record kept in step, folder lock, atomic byte writes, damaged-file explanations, process listing); RapidRAW's `state.py` re-exports it. Fixed in both adapters: a refusal now names the problem it refuses over.
