@@ -225,7 +225,11 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 | ID | Requirement | Stories |
 |---|---|---|
 | FR-11 | While the user grades, the app watches for the export: a new folder of frames near the RAW folder. It counts frames as they arrive, calls the export complete when the count matches the sequence and nothing has changed for a few seconds, then offers to finish. The user can choose a different folder at any time. | US-9, US-11 |
-| FR-12 | Video settings come from a short list: resolution (original, 4K, 1080p), frame rate (24, 25, 30), format (H.264 for sharing, H.265 10-bit for smoother gradients at the same size, ProRes 422 HQ for editing), and optionally corrected frames as files. Each format has a one-line explanation and the trade-off (plays anywhere; smoother but some PCs need an extension; near-lossless but large). Dither is on by default with an off switch under "More". | US-10 |
+| FR-12 | Finishing opens an **export window**: presets up front, every option one click away (section 11, W5). Presets: *Share* (H.264, 4K or 1080p), *Master* (H.265 10-bit, native size), *Edit* (ProRes 422 HQ, native size), *Frames* (16-bit TIFF or PNG sequence). Each shows its trade-off in one line. Nothing about a project's size or quality is capped by the app. | US-10 |
+| FR-12a | **Advanced options**, all available to anyone who wants them: resolution (native, 8K, 6K, 4K, 1440p, 1080p, or a custom width, aspect always kept); frame rate (23.976, 24, 25, 29.97, 30, 50, 60, or custom); format and profile (H.264; H.265 8- or 10-bit; ProRes Proxy, LT, 422, HQ, 4444); quality (a slider from "smaller" to "visually lossless", with a number for people who know CRF); colour detail (4:2:0, 4:2:2, 4:4:4, where the format supports it); dither on or off; frame range (trim the start and end); corrected frames as files (format and bit depth); file name and location. (library: each becomes a `finish` option first, so the command line has the same choices) | US-10 |
+| FR-12b | The window checks choices as they're made and says what they mean before anything is written: estimated file size and time, free disk space, and compatibility notes (H.264 above 4K won't play on some devices; H.265 needs Microsoft's HEVC extension on some PCs; ProRes 4444 at 8K needs a lot of space). Combinations a format can't do are explained rather than silently changed. | US-10 |
+| FR-12c | People can save their own presets, which appear beside the built-in ones and are stored with the app's preferences, so a studio's usual delivery settings are one click away. | US-10 |
+| FR-12d | Every video is tagged with its colour standard (BT.709, full or limited range as written), so players show its colours as intended. (library) | |
 | FR-13 | Finish writes a report file next to its output describing every frame's measurement, target and correction, plus the flags. (library) | US-12, US-13 |
 
 ### Review and refine
@@ -537,25 +541,33 @@ Low-fidelity, to agree on structure before any visual design. Widths are indicat
 
 There's nothing to tick off: the step completes when the work is actually done. The app watches the RAW folder's surroundings for a new folder of frames, counts them as they arrive, and calls the export complete when the count matches and nothing has changed for a few seconds. "Choose folder instead" is always available. For Lightroom, the first tip is "Select every frame, then Metadata > Read Metadata from Files", and the Prepare screen asks for "Save Metadata to Files" to be confirmed before Apply is enabled.
 
-### W5. Finish
+### W5. Finish: the export window
 
 ```
 +--------------------------------------------------------------------------+
-|  (1) Folder  ---  (2) Prepare  ---  (3) Grade  ---  (4) Finish  --- (5)  |
-+--------------------------------------------------------------------------+
-| Exported frames   F:\...\salman shoot\final-export   229 frames  [Change]|
+| Export                                                                   |
 |                                                                          |
-| Video            ( ) Original size  (o) 4K  ( ) 1080p                    |
-| Frame rate       (o) 24  ( ) 25  ( ) 30                                  |
-| Format           (o) H.264, plays anywhere                               |
-|                  ( ) H.265 10-bit, smoother skies, same size             |
-|                  ( ) ProRes 422 HQ, for editing (large)                  |
-| Save to          C:\Users\James\Videos\dusk shoot.mp4           [Change] |
-| Also save corrected frames   [ ]                                         |
+| Exported frames  F:\...\salman shoot\final-export   229 frames  [Change] |
 |                                                                          |
-| About 1.6 GB free space needed; 212 GB free.          [ Finish video ]   |
+| [ Share ]  [ Master ]  [ Edit ]  [ Frames ]  [ My 4K delivery ]  [ + ]   |
+|   H.264 4K, plays anywhere                                               |
+|                                                                          |
+| Save to   C:\Users\James\Videos\dusk shoot.mp4                 [Change] |
+|                                                                          |
+| > Advanced                                                               |
+|   Resolution    [ Native 6000 x 4000 v ]   Frame rate  [ 24 v ]          |
+|   Format        [ H.264 v ]  Profile [ High v ]   Colour detail [4:2:0 v]|
+|   Quality       smaller [=======o==] visually lossless     (CRF 16)      |
+|   Dither        [x]        Frame range  1 to 229                         |
+|   Also save corrected frames  [ ]  as [ 16-bit TIFF v ]                  |
+|                                                                          |
+| About 1.6 GB and 4 minutes. 212 GB free.                                 |
+| Note: H.264 at this size won't play on some phones and TVs.              |
+|                                         [ Save as preset ] [ Export ]    |
 +--------------------------------------------------------------------------+
 ```
+
+Presets cover most people in one click; "Advanced" is closed by default and remembers being opened. Changing any advanced option turns the preset into "Custom", which can be saved under a name.
 
 ### W6. Review (the main screen after finishing)
 
@@ -1059,6 +1071,7 @@ Second usability round, light theme, Mac and Linux out of "experimental" once co
 - **Sleep and laptops on battery.** Long jobs should keep the machine awake while running, and warn on battery power before a long finish.
 - **Antivirus slowing everything down.** Real-time scanning of thousands of freshly written frames can make finishing several times slower. Worth knowing when someone reports "it's slow"; the diagnostics bundle should record whether output went to a scanned folder.
 - **High-DPI and very large screens.** Frames should be shown at their real pixel size when zoomed to 100%; Windows display scaling can blur them otherwise.
+- **Colour tags in videos.** Untagged videos make players guess their colour standard, and some guess wrong, showing colours slightly off. Every export is tagged (FR-12d).
 - **Colour management.** Preview images are sRGB. On wide-gamut monitors, an unmanaged display would show them over-saturated. Check what Flutter does; at minimum, say in the docs that judging colour belongs in the editor.
 - **Running the app and the editor at the same time.** People will keep RapidRAW open. The app should check for this before writing and offer "Retry" after closing, which the editor plug-ins already support.
 - **Old projects after an upgrade.** `project.json` and reports are versioned; a newer app must read older files, and an older app must refuse newer ones with a clear message.
