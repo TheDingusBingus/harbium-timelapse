@@ -11,6 +11,10 @@ https://github.com/user-attachments/assets/44b26f32-7309-4671-a73f-376aaa684f92
 
 It's very much a work in progress. So far it has been tested properly on one real sequence: 229 frames from a Canon R6, shot from late afternoon into night, with a variable ND filter being turned, a few ISO changes, people walking through and light trails, edited in RapidRAW on Windows. The finished video looked smooth, and measured smooth as well. I'd like to try it on plenty more footage before claiming much beyond that, so if you give it a go, I'd love to hear how you get on.
 
+As an outside check, `finish` has also been run on the 16 timelapse clips from a deflickering research dataset (CVPR 2023): between them they go from 138 sudden jumps to 2, and none gets noticeably worse. The details, and how to rerun it, are in [docs/BENCHMARK.md](docs/BENCHMARK.md).
+
+It's built for timelapses shot on a tripod. Hyperlapses, where the camera moves between frames, aren't supported yet.
+
 ## How it works in practice
 
 There are three steps:
@@ -49,6 +53,7 @@ Do the keyframe blend before `prepare`, because blending resets the deflicker. T
 - Frames that are randomly a touch brighter or darker, and the bigger steps you introduce yourself by changing ISO or shutter speed or turning an ND filter. ND changes aren't recorded in the file, so it finds those from the pictures.
 - Auto white balance that wanders from frame to frame.
 - People, cars, birds and light trails moving through the shot. Brightness is measured on the parts of the scene that stay still, so a crowd walking past won't make it think the whole frame got darker.
+- Parts of the scene changing on their own, like clouds drifting over the sky or lights coming on in a building. Real flicker changes every part of the picture by the same amount, so each frame is measured region by region and a sky doing its own thing gets outvoted.
 - Interruptions. Your original photos are never changed, edit files are backed up before their first change, a run that gets interrupted can simply be run again, and it won't write anything while your editor is open.
 
 ## Installing
@@ -122,6 +127,7 @@ Lightroom support is new and hasn't been tried inside Lightroom itself yet, so p
 - RawTherapee and darktable support
 - A simple app with an installer, with ExifTool and ffmpeg included
 - Better handling of very large ND filter changes in `finish`
+- Hyperlapse support (lining frames up before measuring them)
 - Motion blur between frames
 
 ## Credits

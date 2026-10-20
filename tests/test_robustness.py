@@ -145,3 +145,52 @@ def test_ordered_map_keeps_order_and_falls_back():
     from harbium_timelapse.parallel import ordered_map
     assert list(ordered_map(abs, [-3, 1, -2, 5, -9, 4], workers=3)) == [3, 1, 2, 5, 9, 4]
     assert list(ordered_map(abs, [-1, -2], workers=4)) == [1, 2]            # too few to bother
+
+
+# --- part of the scene changing on its own isn't flicker ------------------------
+
+def _scene(rng, sky=0.35, h=144, w=256):
+    img = np.exp(rng.normal(-2.0, 0.5, (h, w)))
+    img[: int(h * sky)] = 0.55                                    # a bright, plain sky
+    return img
+
+
+def _flicker_plus_sky(sky):
+    from harbium_timelapse.measure import steady_change
+    rng = np.random.default_rng(5)
+    before = _scene(rng, sky)
+    after = before * 2 ** 0.10                                  # real flicker: +0.10 stops everywhere
+    after[: int(before.shape[0] * sky)] *= 2 ** 0.20              # and the sky brightens a further 0.20
+    return steady_change(before, after)
+
+
+def test_a_sky_changing_on_its_own_is_outvoted():
+    """Flicker moves every region the same; a sky brightening alone moves only
+    the sky. The measured change should be the flicker (0.10), not the sky.
+    (The old whole-frame measure read 0.196 and 0.234 here.) It's exact while
+    the part doing its own thing is a minority of the frame, and degrades as
+    it nears half: no majority vote can tell which half is the flicker."""
+    assert abs(_flicker_plus_sky(0.20) - 0.10) < 0.01
+    assert abs(_flicker_plus_sky(0.35) - 0.10) < 0.04
+
+
+def test_a_true_global_change_is_still_exact():
+    from harbium_timelapse.measure import steady_change
+    rng = np.random.default_rng(6)
+    before = _scene(rng)
+    assert abs(steady_change(before, before * 2 ** -0.37) + 0.37) < 1e-9
+
+
+def test_a_mostly_black_region_gets_no_say():
+    """Where a channel is crushed to black, the few surviving pixels are a
+    biased sample: those regions must not outvote the healthy ones."""
+    from harbium_timelapse.measure import BLACK, steady_change
+    rng = np.random.default_rng(7)
+    before = _scene(rng)
+    after = before * 2 ** 0.25
+    crushed = np.zeros(before.shape, bool)
+    crushed[:, : before.shape[1] // 2] = rng.random((before.shape[0], before.shape[1] // 2)) < 0.85
+    before[crushed] = BLACK / 2                                  # left half: 85% crushed to black
+    odd = ~crushed & (np.arange(before.shape[1]) < before.shape[1] // 2)
+    after[odd] *= 4                                              # and its survivors misbehave
+    assert abs(steady_change(before, after) - 0.25) < 0.02

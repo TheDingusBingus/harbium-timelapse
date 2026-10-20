@@ -112,28 +112,77 @@ def steady_input(linear: np.ndarray) -> np.ndarray:
     return np.where(img.max(axis=-1) >= CLIPPED, 1.0, lum)
 
 
+REGIONS = (6, 8)              # rows × columns the frame is split into for the vote
+MIN_REGION_PIXELS = 200       # a region needs this many usable still pixels to vote...
+MIN_REGION_SHARE = 0.3        # ...and this share of its area: a mostly black or blown region's few
+                              # surviving pixels are a biased sample, so it doesn't get a say
+MIN_VOTERS = 5                # fewer voting regions: use the whole frame's still pixels instead
+
+
 def steady_change(previous: np.ndarray | None, current: np.ndarray) -> float | None:
     """How much the still part of the scene changed between two frames, in stops.
 
     Per-pixel changes find the movers: pixels that changed far more (or less)
-    than the frame's typical change (people, cars, birds). The change is then
-    the ratio of the still pixels' total brightness. Totals over thousands of
-    pixels average out 8-bit rounding, which per-pixel medians don't, and the
-    ratio is exact for any change that really is global.
+    than the frame's typical change (people, cars, birds), which are set aside.
+
+    Flicker changes every part of the picture by the same amount; the scene
+    changing (a cloud drifting over the sky, lights coming on in one area)
+    changes only part of it. So each of 48 regions measures its own change,
+    as the ratio of its still pixels' total brightness (totals over thousands
+    of pixels average out 8-bit rounding, which per-pixel medians don't).
+    Regions that are mostly black, blown or moving don't vote; the rest count
+    by how many pixels they measured, and the frame's change is the average of
+    the middle fifth of that weighted vote (see ``_weighted_median``). Exact
+    when the change really is global; a sky doing its own thing gets outvoted
+    instead of dragging the whole frame with it. With fewer than five voting
+    regions, it's the old whole-frame ratio.
     ``None`` if the two frames can't be compared."""
     if previous is None or previous.shape != current.shape:
         return None
     ok = (previous > BLACK) & (current > BLACK) & (previous < CLIPPED) & (current < CLIPPED)
     if ok.sum() < MIN_STEADY_PIXELS:
         return None
-    p, c = previous[ok], current[ok]
-    d = np.log2(c) - np.log2(p)
-    typical = np.median(d)
-    spread = 1.4826 * np.median(np.abs(d - typical))
-    still = np.abs(d - typical) < max(MOVER, 3 * spread)
+    d = np.zeros(previous.shape)
+    d[ok] = np.log2(current[ok]) - np.log2(previous[ok])
+    typical = np.median(d[ok])
+    spread = 1.4826 * np.median(np.abs(d[ok] - typical))
+    still = ok & (np.abs(d - typical) < max(MOVER, 3 * spread))
     if still.sum() < MIN_STEADY_PIXELS:
         return None
-    return float(np.log2(c[still].sum() / p[still].sum()))
+    votes = _regional_changes(previous, current, still)
+    if len(votes) >= MIN_VOTERS:
+        return _weighted_median(votes)
+    return float(np.log2(current[still].sum() / previous[still].sum()))
+
+
+def _regional_changes(previous: np.ndarray, current: np.ndarray, still: np.ndarray) -> list[tuple[float, int]]:
+    """Each region's change and how many pixels it measured it from."""
+    rows, cols = REGIONS
+    h, w = still.shape[:2]
+    votes = []
+    for r in range(rows):
+        for c in range(cols):
+            area = (slice(r * h // rows, (r + 1) * h // rows), slice(c * w // cols, (c + 1) * w // cols))
+            m = still[area]
+            n = int(m.sum())
+            if n >= MIN_REGION_PIXELS and n >= MIN_REGION_SHARE * m.size:
+                votes.append((float(np.log2(current[area][m].sum() / previous[area][m].sum())), n))
+    return votes
+
+
+def _weighted_median(votes: list[tuple[float, int]], band: float = 0.2) -> float:
+    """The middle answer, with each region counting by how many pixels it
+    measured. The middle ``band`` of the weight is averaged rather than one
+    region's answer picked, so it's as robust as a median but less noisy."""
+    values = np.array([v for v, _ in votes])
+    weights = np.array([n for _, n in votes], dtype=np.float64)
+    order = np.argsort(values)
+    values, weights = values[order], weights[order] / weights.sum()
+    top = np.cumsum(weights)
+    bottom = top - weights
+    lo, hi = 0.5 - band / 2, 0.5 + band / 2
+    share = np.clip(np.minimum(top, hi) - np.maximum(bottom, lo), 0.0, None)   # each value's part of the band
+    return float((values * share).sum() / share.sum())
 
 
 def measurable(values: np.ndarray) -> bool:

@@ -246,3 +246,18 @@ Built from James's real Lightroom Classic sidecars (Canon EOS 80D, 2024, Camera 
 Verified on copies of all 14 real files: only the exposure value changes; undo restores every file byte for byte; the orphan copy is never touched. Not verified: Lightroom reading the result back (no Lightroom available). Workflow: Save Metadata to Files → close Lightroom → `timelapse prepare` → Read Metadata from Files. DNG/JPEG/TIFF (settings inside the file) not supported.
 
 Refactor: generic safety machinery moved to `editors/common.py` (backups, record kept in step, folder lock, atomic byte writes, damaged-file explanations, process listing); RapidRAW's `state.py` re-exports it. Fixed in both adapters: a refusal now names the problem it refuses over.
+
+
+---
+
+## Addendum 5 — 20 Oct 2026: outside benchmark, and the regional vote
+
+Benchmarked `finish` on the 16 TimeLapse clips of the CVPR 2023 blind-deflickering dataset (Lei et al., CC BY 4.0; 768×432 YouTube JPEGs, all tripod), scored with measures independent of the tool's own (patch-median regional wobble, sudden jumps, shadows+mid-tones). See docs/BENCHMARK.md and benchmarks/score_finish.py.
+
+Weakness found: `steady_change` took the ratio of all still pixels' total brightness, so in linear light bright regions dominated. A sky or lights changing on their own (slow enough to pass the 0.25-stop mover test) were read as global flicker; on low-flicker clips (city, beach, tide) `finish` made things worse (city 0.003 → 0.012).
+
+Fix (in `measure.steady_change`, so both deflicker-from-RAW and finish benefit): movers found as before; then 6×8 regions each give the ratio of their still pixels' totals (keeps 8-bit rounding averaging); regions vote. A region votes only with ≥200 still pixels and ≥30% of its area (mostly black/blown regions are biased samples: night2day's red channel crushed in 60% of frames regressed until this rule); votes weighted by pixel count; the middle 20% of the weight is averaged (a plain weighted median was noisier). Fewer than 5 voters: the old whole-frame ratio. Exact for a truly global change.
+
+Evidence: known-answer synthetic test (static ground, sky changing on its own, 0.05 flicker): leftover ground wobble 0.025 (old) → 0.006–0.007 (new), 5 seeds. Sky-share sweep (truth 0.100): 20% → 0.100 (old 0.196), 35% → 0.126 (old 0.234), 45% → 0.188 (old 0.251): degrades as the self-changing part nears half (inherent to any vote). CVPR: new never worse than old on any clip; old made 3 clips worse than untouched, new none (regional score). James's dusk sequence (web-compressed "before" half of the README video, finish only, no prepare): regional wobble 0.178 → 0.054 (old) / 0.013 (new); jumps 46 → 11 / 0.
+
+Not covered: moving cameras (no clip in the dataset); compare with the paper's own method (GPU; different metric).
