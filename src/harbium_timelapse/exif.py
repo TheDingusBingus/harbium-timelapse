@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import hashlib
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -40,12 +42,119 @@ def exiftool_available() -> bool:
 
 
 def read_frames(paths: list[Path], progress: Progress | None = None) -> list[Frame]:
-    """Read settings for many files at once. Same order as ``paths``."""
+    """Read settings for many files at once. Same order as ``paths``.
+
+    Settings already read are remembered (see ``_SettingsCache``), so running
+    a second command on the same folder doesn't read every file again: on a
+    slow external drive that was minutes per command."""
     paths = [Path(p) for p in paths]
+    have_exiftool = exiftool_available()
+    cache = _SettingsCache(paths, have_exiftool)
     found: dict[str, Frame] = {}
-    if paths and exiftool_available():
-        found = _read_with_exiftool(paths, progress)
-    return [found.get(_key(p)) or _read_with_exifread(p) for p in paths]
+    todo = [p for p in paths if cache.get(p) is None]
+    if todo and have_exiftool:
+        found = _read_with_exiftool(todo, progress)
+    frames = []
+    for p in paths:
+        frame = cache.get(p)
+        if frame is None:
+            frame = found.get(_key(p)) or _read_with_exifread(p)
+            cache.put(p, frame, "exiftool" if _key(p) in found else "exifread")
+        frames.append(frame)
+    if progress and not todo:
+        progress(len(paths), len(paths))
+    cache.save()
+    return frames
+
+
+class _SettingsCache:
+    """Camera settings remembered between runs, per folder, in your user cache
+    folder (never inside your photo folders).
+
+    An entry is used only while the file's size and modified time are
+    unchanged. Settings read without ExifTool are read again once ExifTool is
+    installed. Any problem with the cache just means reading the files again.
+    ``HARBIUM_NO_CACHE=1`` turns it off; ``HARBIUM_CACHE`` moves it."""
+
+    def __init__(self, paths: list[Path], have_exiftool: bool) -> None:
+        self.entries: dict[str, dict] = {}
+        self.changed = False
+        self.file: Path | None = None
+        self.have_exiftool = have_exiftool
+        if not paths or os.environ.get("HARBIUM_NO_CACHE"):
+            return
+        folder = os.path.normcase(os.path.abspath(str(paths[0].parent)))
+        self.file = _cache_dir() / (hashlib.sha1(folder.encode("utf-8")).hexdigest()[:20] + ".json")
+        try:
+            data = json.loads(self.file.read_text(encoding="utf-8"))
+            if data.get("version") == 1 and data.get("folder") == folder:
+                self.entries = data.get("files", {})
+        except (OSError, ValueError, AttributeError):
+            self.entries = {}
+        self.folder = folder
+
+    @staticmethod
+    def _stamp(path: Path) -> list | None:
+        try:
+            st = path.stat()
+            return [st.st_size, st.st_mtime_ns]
+        except OSError:
+            return None
+
+    def get(self, path: Path) -> Frame | None:
+        entry = self.entries.get(path.name)
+        if not entry or entry.get("stamp") != self._stamp(path):
+            return None
+        if entry.get("via") == "exifread" and self.have_exiftool:
+            return None
+        try:
+            f = entry["frame"]
+            return Frame(
+                path=path,
+                taken_at=datetime.fromisoformat(f["taken_at"]) if f.get("taken_at") else None,
+                shutter=f.get("shutter"), aperture=f.get("aperture"), iso=f.get("iso"),
+                camera=f.get("camera"), white_balance=f.get("white_balance"),
+                white_balance_neutral=tuple(f["neutral"]) if f.get("neutral") else None,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def put(self, path: Path, frame: Frame, via: str) -> None:
+        if self.file is None:
+            return
+        stamp = self._stamp(path)
+        if stamp is None:
+            return
+        self.entries[path.name] = {"stamp": stamp, "via": via, "frame": {
+            "taken_at": frame.taken_at.isoformat() if frame.taken_at else None,
+            "shutter": frame.shutter, "aperture": frame.aperture, "iso": frame.iso,
+            "camera": frame.camera, "white_balance": frame.white_balance,
+            "neutral": list(frame.white_balance_neutral) if frame.white_balance_neutral else None,
+        }}
+        self.changed = True
+
+    def save(self) -> None:
+        if self.file is None or not self.changed:
+            return
+        try:
+            self.file.parent.mkdir(parents=True, exist_ok=True)
+            temp = self.file.with_name(self.file.name + f".{os.getpid()}.tmp")
+            temp.write_text(json.dumps({"version": 1, "folder": self.folder, "files": self.entries}),
+                            encoding="utf-8")
+            os.replace(temp, self.file)
+        except OSError:
+            pass                      # a cache that can't be saved just means reading again next time
+
+
+def _cache_dir() -> Path:
+    if os.environ.get("HARBIUM_CACHE"):
+        return Path(os.environ["HARBIUM_CACHE"])
+    if sys.platform.startswith("win"):
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "harbium-timelapse" / "cache"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "harbium-timelapse"
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "harbium-timelapse"
 
 
 def read_frame(path: Path | str) -> Frame:

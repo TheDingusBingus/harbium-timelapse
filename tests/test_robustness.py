@@ -5,7 +5,7 @@ corrections and finish wrote 20 pure-black frames."""
 import numpy as np
 from PIL import Image
 
-from harbium_timelapse import cli, smooth_flicker
+from harbium_timelapse import cli, measure_light, smooth_flicker
 from harbium_timelapse.deflicker import smooth_brightness
 from harbium_timelapse.finish import _linear_to_srgb, apply_finish, finished_frames, plan_finish
 from harbium_timelapse.sequencer import load_sequence
@@ -116,3 +116,32 @@ def test_programs_are_never_taken_from_the_current_folder(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(tmp_path / "nowhere")]))
     assert find_program("exiftool") is None
+
+
+# --- parallel measuring gives exactly the same answers --------------------------
+
+def test_parallel_measuring_matches_one_at_a_time(tmp_path, monkeypatch):
+    from harbium_timelapse.finish import measure_channels
+    fs = frames(tmp_path / "e", bad=10)
+    monkeypatch.setenv("HARBIUM_WORKERS", "1")
+    one_b, one_w = measure_light(fs)
+    one_c = measure_channels(fs)
+    monkeypatch.setenv("HARBIUM_WORKERS", "3")
+    par_b, par_w = measure_light(fs)
+    par_c = measure_channels(fs)
+    assert np.array_equal(one_b, par_b, equal_nan=True) and np.array_equal(one_w, par_w)
+    assert np.array_equal(one_c, par_c, equal_nan=True)
+
+
+def test_a_bad_file_is_still_reported_in_parallel(tmp_path, monkeypatch):
+    fs = frames(tmp_path / "e")
+    fs[7].write_bytes(b"not a picture")
+    monkeypatch.setenv("HARBIUM_WORKERS", "3")
+    with pytest.raises(ValueError, match="f8.png"):
+        measure_light(fs)
+
+
+def test_ordered_map_keeps_order_and_falls_back():
+    from harbium_timelapse.parallel import ordered_map
+    assert list(ordered_map(abs, [-3, 1, -2, 5, -9, 4], workers=3)) == [3, 1, 2, 5, 9, 4]
+    assert list(ordered_map(abs, [-1, -2], workers=4)) == [1, 2]            # too few to bother

@@ -26,7 +26,7 @@ from harbium_timelapse import Sequence
 
 from .sidecar import (get_exposure, get_temperature, read_sidecar, set_exposure,
                       set_temperature, sidecar_path, write_sidecar)
-from .state import STATE_DIR, clear_ledger, read_json, read_ledger, write_json, write_ledger
+from .state import STATE_DIR, clear_ledger, folder_lock, read_json, read_ledger, write_json, write_ledger
 
 REBUILD_COPY = "rapidraw.rebuild.json"
 
@@ -86,7 +86,13 @@ def overwritten_frames(seq: Sequence) -> list[str]:
 
 def rebuild(seq: Sequence) -> tuple[int, int]:
     """Back to where you were: keyframes from the originals, the blend between
-    them, every deflicker and refine correction re-applied.
+    them, every deflicker and refine correction re-applied."""
+    with folder_lock(seq.folder):
+        return _rebuild(seq)
+
+
+def _rebuild(seq: Sequence) -> tuple[int, int]:
+    """The rebuild itself (see ``rebuild``).
 
     Returns (frames rebuilt, keyframes found).
     """

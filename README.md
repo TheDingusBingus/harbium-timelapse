@@ -27,7 +27,8 @@ timelapse finish   ~/Pictures/sunset-export --video sunset.mp4   # 3. last wobbl
 - **Removes flicker and keeps the light's real journey** (sunset, blue hour, night), and smooths out your own exposure changes: ISO and shutter steps, and hand-turned ND filters (found from the pictures, since an ND leaves no trace in the file).
 - **Steadies auto white balance** frame to frame, exactly on the editor's own Kelvin and tint scale.
 - **Finishes exported frames**: one brightness and colour correction per frame. No masks, nothing local, no halos.
-- Safe by design: originals untouched, edit files backed up before the first change, interrupted runs can simply be run again, and nothing is written while your editor is open.
+- Safe by design: originals untouched, edit files backed up before the first change, interrupted runs can simply be run again, one run per folder at a time, and nothing is written while your editor is open.
+- Quick on repeat: frames are measured on all CPU cores, and camera settings are remembered between runs (in your user cache folder, never in your photo folders; `HARBIUM_NO_CACHE=1` turns it off).
 
 ## Install
 
@@ -89,7 +90,6 @@ If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse pr
 - Lightroom / Camera Raw adapter (XMP), then RawTherapee and darktable
 - A simple window (no command line) and a one-click installer with ExifTool and ffmpeg included
 - Patch-weighted measuring in `finish` (small steps can survive at big ND turns)
-- Camera-settings cache, so repeat runs on a slow drive are near-instant
 - Faster measuring, using every CPU core
 - Motion blur between frames
 

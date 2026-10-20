@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -35,11 +37,14 @@ def restore(folder: Path | str) -> int:
     folder = Path(folder)
     originals = folder / STATE_DIR / "originals"
     count = 0
-    if originals.is_dir():
-        for backup in originals.iterdir():
-            shutil.copy2(backup, folder / backup.name)
-            count += 1
-    clear_ledger(folder)
+    with folder_lock(folder):
+        if originals.is_dir():
+            for backup in originals.iterdir():
+                if backup.name.endswith(".tmp"):
+                    continue
+                shutil.copy2(backup, folder / backup.name)
+                count += 1
+        clear_ledger(folder)
     return count
 
 
@@ -85,20 +90,102 @@ def write_ledger(folder: Path, frames: dict) -> None:
     write_json(Path(folder) / STATE_DIR / LEDGER, {"version": 1, "frames": frames})
 
 
+LOCK = "lock"
+STALE_AFTER = 6 * 3600          # seconds: a lock older than this is from a run that died
+_held: dict[str, int] = {}      # locks this process holds (so nested steps don't lock themselves out)
+
+
+@contextmanager
+def folder_lock(folder: Path):
+    """Only one run changes a folder at a time. A second run is refused with an
+    explanation; a lock left by a run that crashed is noticed and cleared."""
+    key = os.path.normcase(os.path.abspath(str(folder)))
+    if _held.get(key):
+        _held[key] += 1
+        try:
+            yield
+        finally:
+            _held[key] -= 1
+        return
+    path = Path(folder) / STATE_DIR / LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in (1, 2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            pid, started = _lock_owner(path)
+            if attempt == 1 and (time.time() - started > STALE_AFTER or not _alive(pid)):
+                path.unlink(missing_ok=True)          # left by a run that's no longer going
+                continue
+            when = time.strftime("%H:%M", time.localtime(started)) if started else "earlier"
+            raise ValueError(
+                f"Another run is changing this folder right now (started {when}). Wait for it to "
+                f"finish. If nothing else is running, delete {path} and try again.") from None
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps({"pid": os.getpid(), "started": time.time()}))
+    _held[key] = 1
+    try:
+        yield
+    finally:
+        _held.pop(key, None)
+        path.unlink(missing_ok=True)
+
+
+def _lock_owner(path: Path) -> tuple[int, float]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return int(data.get("pid", 0)), float(data.get("started", 0))
+    except (OSError, ValueError, TypeError):
+        return 0, 0.0
+
+
+def _alive(pid: int) -> bool:
+    """Is that process still running? (Unsure counts as yes: safer.)"""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)   # query-limited
+            if not handle:
+                return False
+            code = ctypes.c_ulong()
+            ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return code.value == 259                                          # STILL_ACTIVE
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)                     # POSIX: signal 0 only checks; never used on Windows
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+
 @contextmanager
 def ledger_kept_in_step(folder: Path):
     """The ledger, saved on the way out however the block ends (done, error,
     Ctrl+C). Update its entry right after each sidecar is written, and the
     record always matches the files, so an interrupted run can't make the
     next one stack corrections on corrections."""
-    ledger = read_ledger(folder)
-    try:
-        yield ledger
-    finally:
-        if ledger:
-            write_ledger(folder, ledger)
-        else:
-            (Path(folder) / STATE_DIR / LEDGER).unlink(missing_ok=True)   # nothing recorded: no file
+    with folder_lock(folder):
+        ledger = read_ledger(folder)
+        try:
+            yield ledger
+        finally:
+            _save_or_clear(folder, ledger)
+
+
+def _save_or_clear(folder: Path, ledger: dict) -> None:
+    if ledger:
+        write_ledger(folder, ledger)
+    else:
+        (Path(folder) / STATE_DIR / LEDGER).unlink(missing_ok=True)   # nothing recorded: no file
 
 
 def clear_ledger(folder: Path) -> None:

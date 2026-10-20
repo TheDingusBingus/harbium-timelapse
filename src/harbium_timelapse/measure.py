@@ -30,6 +30,7 @@ import numpy as np
 from PIL import Image
 
 from .sequencer import RAW_EXTENSIONS
+from .parallel import ordered_map
 from .types import Sequence
 
 LONG_EDGE = 512        # pixels; brightness doesn't need more
@@ -87,13 +88,8 @@ def measure_light(
     profiles = np.empty((len(paths), _PERCENTS.size))
     warmth = np.empty(len(paths))
     chain = SteadyChain()
-    for i, path in enumerate(paths):
-        try:
-            image, warmth[i] = _load(path, speed)
-        except ImportError:
-            raise
-        except Exception as e:
-            raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
+    loaded = ordered_map(_load_for_measuring, [(path, speed) for path in paths])
+    for i, (image, warmth[i]) in enumerate(loaded):
         profiles[i] = tone_profile(image)
         chain.add(steady_input(image))
         if progress:
@@ -275,6 +271,17 @@ def warmth_of(linear_rgb: np.ndarray) -> float:
         ok = np.ones(img.shape[:2], dtype=bool)
     red, blue = img[..., 0][ok].mean(), img[..., 2][ok].mean()
     return float(np.log2(red / blue)) if red > 0 and blue > 0 else 0.0
+
+
+def _load_for_measuring(job: tuple[Path, str]) -> tuple[np.ndarray, float]:
+    """One frame's small linear image and warmth. Runs in a worker process."""
+    path, speed = job
+    try:
+        return _load(path, speed)
+    except ImportError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
 
 
 def _load(path: Path, speed: str) -> tuple[np.ndarray, float]:

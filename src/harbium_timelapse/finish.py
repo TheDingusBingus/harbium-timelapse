@@ -42,6 +42,7 @@ from .measure import (
     CLIPPED, LONG_EDGE, _PERCENTS, SteadyChain, _srgb_to_linear, brightness_from_profiles,
     tone_profile,
 )
+from .parallel import ordered_map
 from .render import RENDERABLE, ffmpeg, ffmpeg_available
 from .sequencer import _natural_key
 
@@ -114,8 +115,7 @@ def measure_channels(frames: list[Path], progress: Progress | None = None, stead
     whole-frame tone measure fills in where two frames can't be compared."""
     profiles = np.empty((3, len(frames), _PERCENTS.size))
     chains = [SteadyChain(), SteadyChain(), SteadyChain()]
-    for i, path in enumerate(frames):
-        small = _small_linear(_read(path))
+    for i, small in enumerate(ordered_map(_small_linear_of, frames)):
         blown = small.max(axis=-1) >= CLIPPED
         for c in range(3):
             profiles[c, i] = tone_profile(small[..., c])
@@ -247,6 +247,11 @@ def correct(img: np.ndarray, gains_stops) -> np.ndarray:
         lut = np.round(_linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * levels).astype(img.dtype)
         out[..., c] = lut[img[..., c]]
     return out
+
+
+def _small_linear_of(path: Path) -> np.ndarray:
+    """A frame's small measuring copy, read from disk. Runs in a worker process."""
+    return _small_linear(_read(path))
 
 
 def _small_linear(img: np.ndarray) -> np.ndarray:

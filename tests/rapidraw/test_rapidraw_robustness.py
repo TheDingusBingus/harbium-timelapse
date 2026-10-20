@@ -94,3 +94,41 @@ def test_mixed_raw_and_jpeg_is_refused_unless_forced(tmp_path, capsys):
     assert cli.main(["deflicker", str(tmp_path)]) == 1
     assert "Not changing anything" in capsys.readouterr().err
     assert exposures(images) == before
+
+
+# --- one run at a time ----------------------------------------------------------
+
+def test_a_second_run_is_refused_while_one_is_writing(tmp_path, capsys):
+    import json as _json
+    import os as _os
+    import time as _time
+    images = make_sequence(tmp_path, 10)
+    lock = tmp_path / ".timelapse-core" / "lock"
+    lock.parent.mkdir(exist_ok=True)
+    lock.write_text(_json.dumps({"pid": _os.getppid(), "started": _time.time()}))   # a live process
+    before = exposures(images)
+    with pytest.raises(ValueError, match="Another run"):
+        apply(plan(load(tmp_path), raw_brightness=RAW[:10]))
+    assert exposures(images) == before
+
+
+def test_a_lock_left_by_a_crashed_run_is_cleared(tmp_path):
+    import json as _json
+    import time as _time
+    make_sequence(tmp_path, 10)
+    lock = tmp_path / ".timelapse-core" / "lock"
+    lock.parent.mkdir(exist_ok=True)
+    lock.write_text(_json.dumps({"pid": 999999, "started": _time.time()}))           # no such process
+    apply(plan(load(tmp_path), raw_brightness=RAW[:10]))
+    assert not lock.exists()                                                           # released afterwards
+    lock.write_text(_json.dumps({"pid": 1, "started": _time.time() - 7 * 3600}))     # ancient
+    apply(plan(load(tmp_path), raw_brightness=RAW[:10]))
+
+
+def test_nested_steps_dont_lock_themselves_out(tmp_path):
+    from harbium_timelapse.editors.rapidraw import rebuild
+    images = make_sequence(tmp_path, 10)
+    apply(plan(load(tmp_path), raw_brightness=RAW[:10]))
+    rebuild(load(tmp_path))                     # rebuild -> blend -> ledger: all under one lock
+    assert not (tmp_path / ".timelapse-core" / "lock").exists()
+    assert len(exposures(images)) == 10
