@@ -81,6 +81,16 @@ timelapse editors             list the editors prepare can write to
 timelapse-rapidraw ...        extras for RapidRAW: keyframes, refine, export and rebuild
 ```
 
+### Choosing a video format
+
+`timelapse finish` can make three kinds of video with `--codec`:
+
+- `h264` (the default) plays on practically anything. Good for sharing.
+- `h265` is 10-bit H.265: about the same file size as H.264, with smoother skies and gradients. Some Windows PCs need Microsoft's HEVC extension to play it.
+- `prores` is ProRes 422 HQ (10-bit, in a `.mov` file): close to lossless and much larger, made for cutting the film in a video editor.
+
+For the 10-bit formats, the correction goes to the encoder at 16-bit precision, so it never gets rounded to 8 bits on the way. Corrected 8-bit frames and H.264 video are dithered by default, which hides most of the banding that rounding would otherwise cause in smooth skies (`--no-dither` turns it off). The measurements behind these choices are in [docs/BENCHMARK.md](docs/BENCHMARK.md).
+
 Most commands have a `--dry-run` option that shows what would happen without changing anything, and `--help` lists everything else.
 
 You can also use it from Python:

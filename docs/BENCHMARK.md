@@ -49,6 +49,31 @@ The vote has a natural limit: if close to half the picture really changes on its
 - **RAW files and `prepare`.** For those, see the dusk sequence in the README.
 - **A comparison with the paper's own method.** The paper uses a different measure, and its method runs on a GPU, so the two haven't been compared side by side.
 
+## Video output: does encoding put flicker back?
+
+After deflickering, the frames still have to be encoded into a video, which is lossy. Two questions: does the encoder add flicker of its own, and does it cause banding in smooth skies? Measured with `benchmarks/check_encoding.py`, which decodes the video and compares every frame with the corrected frames it was made from.
+
+**On real dusk footage** (the 229-frame sequence from the README, 960×640):
+
+| Format | Flicker added by the encoder | Largest single step | Similarity (1 = identical) | Size |
+|---|---|---|---|---|
+| H.264 | 0.0043 stops | 0.018 | 0.985 | 4.7 MB |
+| H.265 10-bit | 0.0016 | 0.0085 | 0.989 | 4.6 MB |
+| ProRes 422 HQ | 0.0003 | 0.0027 | 0.996 | 83 MB |
+
+None of them undoes the deflicker: even H.264's largest step is below what's visible (about 0.03 stops). H.265 10-bit adds less than half H.264's flicker at the same size. With only one keyframe in a clip this short, there was no keyframe "pumping".
+
+**On a clean, smooth sky** (synthetic, 48 frames with flicker; "staircase" is how far a 16-row average steps away from a smooth curve, in 8-bit levels, so noise averages out but bands don't):
+
+| | Staircase | Widest band |
+|---|---|---|
+| Source frames (8-bit) | 0.28 levels | 12 px |
+| H.264, no dither | 0.57 | 19 px |
+| H.264, dithered (the default) | 0.43 | 16 px |
+| H.265 10-bit | 0.26 | 15 px |
+
+Plain rounding plus H.264 doubles the source's banding. Dither removes about a quarter of that, but H.264 smooths some of the dither away. H.265 10-bit, fed the correction at 16-bit precision, comes out smoother than the 8-bit source itself.
+
 ## Running it yourself
 
 Download `All-In-One-Deflicker-Dataset.zip` from the [dataset page](https://huggingface.co/datasets/xrenaa/Blind-Video-Deflickering-Dataset), unzip it, then:

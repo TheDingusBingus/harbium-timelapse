@@ -225,7 +225,7 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 | ID | Requirement | Stories |
 |---|---|---|
 | FR-11 | While the user grades, the app watches for the export: a new folder of frames near the RAW folder. It counts frames as they arrive, calls the export complete when the count matches the sequence and nothing has changed for a few seconds, then offers to finish. The user can choose a different folder at any time. | US-9, US-11 |
-| FR-12 | Video settings come from a short list: resolution (original, 4K, 1080p), frame rate (24, 25, 30), and optionally corrected frames as files. | US-10 |
+| FR-12 | Video settings come from a short list: resolution (original, 4K, 1080p), frame rate (24, 25, 30), format (H.264 for sharing, H.265 10-bit for smoother gradients at the same size, ProRes 422 HQ for editing), and optionally corrected frames as files. Each format has a one-line explanation and the trade-off (plays anywhere; smoother but some PCs need an extension; near-lossless but large). Dither is on by default with an off switch under "More". | US-10 |
 | FR-13 | Finish writes a report file next to its output describing every frame's measurement, target and correction, plus the flags. (library) | US-12, US-13 |
 
 ### Review and refine
@@ -547,6 +547,9 @@ There's nothing to tick off: the step completes when the work is actually done. 
 |                                                                          |
 | Video            ( ) Original size  (o) 4K  ( ) 1080p                    |
 | Frame rate       (o) 24  ( ) 25  ( ) 30                                  |
+| Format           (o) H.264, plays anywhere                               |
+|                  ( ) H.265 10-bit, smoother skies, same size             |
+|                  ( ) ProRes 422 HQ, for editing (large)                  |
 | Save to          C:\Users\James\Videos\dusk shoot.mp4           [Change] |
 | Also save corrected frames   [ ]                                         |
 |                                                                          |

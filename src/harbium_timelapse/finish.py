@@ -49,6 +49,7 @@ from .sequencer import _natural_key
 Progress = Callable[[int, int], None]
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 JPEG_QUALITY = 95
+DITHER_BAND = 256        # rows dithered at a time
 
 
 def finished_frames(folder: Path | str) -> list[Path]:
@@ -147,9 +148,51 @@ def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool =
     return FinishPlan(tuple(frames), measured, target)
 
 
+CODECS = {
+    # name: what it is, ffmpeg encoder, allowed files, 10-bit?, default quality (CRF; lower is better)
+    "h264": ("H.264, plays anywhere", "libx264", (".mp4", ".mov", ".mkv"), False, 16),
+    "h265": ("H.265 10-bit, smaller files with smoother gradients", "libx265", (".mp4", ".mov", ".mkv"), True, 18),
+    "prores": ("ProRes 422 HQ 10-bit, for editing", "prores_ks", (".mov",), True, None),
+}
+
+
+def check_video_target(video: Path | str, codec: str = "h264") -> None:
+    """Refuse a video that can't be made, before any slow work starts."""
+    if codec not in CODECS:
+        raise ValueError(f"Unknown video format {codec!r}. Choose from: {', '.join(CODECS)}.")
+    label, encoder, suffixes, _, _ = CODECS[codec]
+    if Path(video).suffix.lower() not in suffixes:
+        raise ValueError(f"{label.split(',')[0]} video needs a file ending in {' or '.join(suffixes)} "
+                         f"(not {Path(video).name}).")
+    if ffmpeg_available() and encoder not in _ffmpeg_encoders():
+        raise ValueError(f"This ffmpeg can't make {label.split(',')[0]} video (it has no {encoder}). "
+                         "Use --codec h264, or install a full ffmpeg build.")
+
+
+_ENCODERS: set[str] | None = None
+
+
+def encoders_available(codec: str) -> bool:
+    """Can this computer's ffmpeg make this video format?"""
+    return ffmpeg_available() and CODECS[codec][1] in _ffmpeg_encoders()
+
+
+def _ffmpeg_encoders() -> set[str]:
+    global _ENCODERS
+    if _ENCODERS is None:
+        try:
+            out = subprocess.run([ffmpeg(), "-hide_banner", "-encoders"], capture_output=True, text=True,
+                                 timeout=30).stdout
+            _ENCODERS = {line.split()[1] for line in out.splitlines() if len(line.split()) > 1}
+        except (OSError, subprocess.SubprocessError):
+            _ENCODERS = set()
+    return _ENCODERS
+
+
 def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | str | None = None,
-                 fps: float = 24, width: int | None = None, quality: int = 16,
-                 progress: Progress | None = None, fmt: str | None = None) -> list[Path]:
+                 fps: float = 24, width: int | None = None, quality: int | None = None,
+                 progress: Progress | None = None, fmt: str | None = None,
+                 codec: str = "h264", dither: bool = True) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -190,15 +233,24 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
         out.mkdir(parents=True, exist_ok=True)
     encoder = None
     try:
+        ten_bit = video is not None and CODECS[codec][3]
         for i, (path, gains) in enumerate(zip(plan.frames, plan.gains, strict=True)):
             img, info = _read(path, with_info=True)
-            fixed = correct(img, gains)
+            fixed = None
             if out is not None:
+                to_8bit = targets[i].suffix.lower() in (".jpg", ".jpeg", ".png")
+                fixed = correct(img, gains, out_dtype=np.uint8 if to_8bit else None, dither=dither, seed=i)
                 _write(targets[i], fixed, info)
             if video is not None:
+                if ten_bit:
+                    frame = correct(img, gains, out_dtype=np.uint16)
+                elif fixed is not None and fixed.dtype == np.uint8:
+                    frame = fixed
+                else:
+                    frame = correct(img, gains, out_dtype=np.uint8, dither=dither, seed=i)
                 if encoder is None:
-                    encoder = _Encoder(Path(video), fixed, fps, width, quality)
-                encoder.write(fixed)
+                    encoder = _Encoder(Path(video), frame, fps, width, quality, codec)
+                encoder.write(frame)
             if progress:
                 progress(i + 1, len(plan.frames))
     finally:
@@ -235,17 +287,46 @@ def _same_size_or_raise(frames) -> None:
                              f"{first[0]}x{first[1]}, {p.name} is {'x'.join(map(str, _frame_size(p)))}.")
 
 
-def correct(img: np.ndarray, gains_stops) -> np.ndarray:
-    """One gain per channel, in linear light, through exact lookup tables."""
-    if not np.all(np.isfinite(np.asarray(gains_stops, dtype=np.float64))):
+def correct(img: np.ndarray, gains_stops, out_dtype=None, dither: bool = False, seed: int = 0) -> np.ndarray:
+    """One gain per channel, in linear light, through exact lookup tables.
+
+    ``out_dtype``: the bit depth to produce (default: the same as ``img``).
+    Asking for 16-bit from an 8-bit frame keeps the correction's full
+    precision, for 10-bit video.
+
+    ``dither``: when the result is rounded to 8 bits, add a tiny amount of
+    triangular noise first (spread over less than one level either way, zero
+    on average). Brightening or darkening 8-bit levels otherwise leaves a few
+    levels unused, which can show as banding in smooth skies; dither spreads
+    the rounding so the average of nearby pixels is exactly right. A channel
+    with no correction is passed through untouched, and ``seed`` makes the
+    noise the same every time the same frame is written."""
+    gains = np.asarray(gains_stops, dtype=np.float64)
+    if not np.all(np.isfinite(gains)):
         raise ValueError("Refusing to apply an unknown (non-finite) correction.")
-    levels = _levels(img)
-    v = np.arange(levels + 1, dtype=np.float64) / levels
-    linear = _srgb_to_linear(v)
-    out = img.copy()
-    for c, g in enumerate(gains_stops):
-        lut = np.round(_linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * levels).astype(img.dtype)
-        out[..., c] = lut[img[..., c]]
+    out_dtype = np.dtype(out_dtype or img.dtype)
+    in_levels = _levels(img)
+    out_levels = 65535 if out_dtype == np.uint16 else 255
+    if out_dtype == img.dtype:
+        out = img.copy()
+    else:
+        out = np.round(img.astype(np.float64) * (out_levels / in_levels)).astype(out_dtype)
+    linear = _srgb_to_linear(np.arange(in_levels + 1, dtype=np.float64) / in_levels)
+    rng = np.random.default_rng(seed) if dither else None
+    for c, g in enumerate(gains):
+        channel = img[..., c]
+        if g == 0 and out_dtype == img.dtype:
+            continue                                    # nothing to change: leave it exactly as it was
+        exact = _linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * out_levels
+        if rng is None or out_levels > 255:
+            out[..., c] = np.round(exact).astype(out_dtype)[channel]
+            continue
+        exact = exact.astype(np.float32)
+        for top in range(0, channel.shape[0], DITHER_BAND):          # in bands, so memory stays small
+            values = exact[channel[top:top + DITHER_BAND]]
+            values += rng.random(values.shape, dtype=np.float32)
+            values -= rng.random(values.shape, dtype=np.float32)
+            out[top:top + DITHER_BAND, :, c] = np.clip(np.rint(values), 0, 255).astype(np.uint8)
     return out
 
 
@@ -314,7 +395,8 @@ def _write(path: Path, img: np.ndarray, info: dict) -> None:
 class _Encoder:
     """Feeds corrected frames straight to ffmpeg: no files in between."""
 
-    def __init__(self, target: Path, first: np.ndarray, fps: float, width: int | None, quality: int):
+    def __init__(self, target: Path, first: np.ndarray, fps: float, width: int | None,
+                 quality: int | None, codec: str = "h264"):
         if not ffmpeg_available():
             raise RuntimeError("Making a video needs ffmpeg. On Windows: winget install Gyan.FFmpeg "
                                "(then open a new terminal). Elsewhere: ffmpeg.org.")
@@ -322,11 +404,17 @@ class _Encoder:
         h, w = first.shape[:2]
         scale = f"scale={width // 2 * 2}:-2" if width else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
         pix = "rgb48le" if first.dtype == np.uint16 else "rgb24"
+        crf = str(quality if quality is not None else CODECS[codec][4])
+        video_args = {
+            "h264": ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", crf],
+            "h265": ["-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "slow", "-crf", crf,
+                     "-x265-params", "log-level=error", "-tag:v", "hvc1"],
+            "prores": ["-pix_fmt", "yuv422p10le", "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0"],
+        }[codec]
         self.process = subprocess.Popen(
             [ffmpeg(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
              "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-",
-             "-vf", f"{scale},format=yuv420p", "-c:v", "libx264", "-preset", "slow",
-             "-crf", str(quality), "-movflags", "+faststart", str(target)],
+             "-vf", scale, *video_args, "-movflags", "+faststart", str(target)],
             stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, frame: np.ndarray) -> None:

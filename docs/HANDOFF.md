@@ -261,3 +261,12 @@ Fix (in `measure.steady_change`, so both deflicker-from-RAW and finish benefit):
 Evidence: known-answer synthetic test (static ground, sky changing on its own, 0.05 flicker): leftover ground wobble 0.025 (old) → 0.006–0.007 (new), 5 seeds. Sky-share sweep (truth 0.100): 20% → 0.100 (old 0.196), 35% → 0.126 (old 0.234), 45% → 0.188 (old 0.251): degrades as the self-changing part nears half (inherent to any vote). CVPR: new never worse than old on any clip; old made 3 clips worse than untouched, new none (regional score). James's dusk sequence (web-compressed "before" half of the README video, finish only, no prepare): regional wobble 0.178 → 0.054 (old) / 0.013 (new); jumps 46 → 11 / 0.
 
 Not covered: moving cameras (no clip in the dataset); compare with the paper's own method (GPU; different metric).
+
+
+---
+
+## Addendum 6 — 20 Oct 2026: output quality
+
+`finish` gains `--codec h264|h265|prores` (H.265 10-bit yuv420p10le with hvc1 tag; ProRes 422 HQ prores_ks profile 3, yuv422p10le, .mov only; file type and encoder availability checked before measuring) and dither (on by default, `--no-dither`): `correct()` can output a different bit depth and adds triangular noise (−1..+1 level, zero mean, seeded per frame) before rounding to 8 bits; uncorrected channels pass through untouched. 10-bit video is fed `correct(..., out_dtype=uint16)` from the original frames, skipping 8-bit rounding.
+
+Measured (benchmarks/check_encoding.py, docs/BENCHMARK.md): on real dusk footage the encoder adds 0.0043 (H.264) / 0.0016 (H.265 10-bit) / 0.0003 (ProRes) stops of flicker; none visible. On a clean synthetic sky, banding staircase 0.28 source → 0.57 H.264 plain → 0.43 H.264 dithered → 0.26 H.265 10-bit. H.264 stays the default for compatibility.

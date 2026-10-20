@@ -69,7 +69,8 @@ def _main(argv: list[str] | None = None) -> int:
                                         "then write corrected frames and/or a video")
     fin.add_argument("folder", type=Path, help="your exported frames (JPEG, PNG or TIFF), every frame, in order")
     fin.add_argument("--out", type=Path, default=None, help="folder for corrected frames (same names and formats)")
-    fin.add_argument("--video", type=Path, default=None, help="MP4 to make straight from the corrected frames")
+    fin.add_argument("--video", type=Path, default=None,
+                     help="video to make straight from the corrected frames (.mp4, or .mov for ProRes)")
     fin.add_argument("--fps", type=float, default=24, help="frames per second for the video (default 24)")
     fin.add_argument("--width", type=int, default=None, help="video width, e.g. 3840 (default: native)")
     fin.add_argument("--window", type=int, default=DEFAULT_WINDOW,
@@ -77,6 +78,11 @@ def _main(argv: list[str] | None = None) -> int:
     fin.add_argument("--format", default=None, choices=["jpg", "png", "tif"],
                      help="write corrected frames in this format (default: same as the export). "
                           "For dark sequences: export 16-bit TIFF, write jpg")
+    fin.add_argument("--codec", default="h264", choices=["h264", "h265", "prores"],
+                     help="video format: h264 (default, plays anywhere), h265 (10-bit, smaller, smoother "
+                          "gradients) or prores (ProRes 422 HQ, 10-bit, for editing; needs a .mov file)")
+    fin.add_argument("--no-dither", action="store_true",
+                     help="round corrected 8-bit frames plainly instead of dithering (dither hides banding)")
     fin.add_argument("--brightness-only", action="store_true", help="leave colour exactly as exported")
     fin.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
     fin.add_argument("--csv", type=Path, help="save per-frame measurements and corrections")
@@ -178,7 +184,7 @@ def _render(args) -> int:
 
 
 def _finish(args) -> int:
-    from .finish import apply_finish, finished_frames, measure_channels, plan_finish
+    from .finish import apply_finish, check_video_target, finished_frames, measure_channels, plan_finish
 
     def bar(word):
         def progress(i: int, n: int) -> None:
@@ -190,6 +196,12 @@ def _finish(args) -> int:
     if args.fps <= 0 or (args.width is not None and args.width < 16) or args.window < 3:
         print("Check the numbers: --fps above 0, --width at least 16, --window at least 3.", file=sys.stderr)
         return 1
+    if args.video is not None:
+        try:
+            check_video_target(args.video, args.codec)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
     if not (args.dry_run or args.out or args.video):
         print("Say where to put the result: --out FOLDER for frames, --video FILE.mp4, or both "
               "(or --dry-run to just measure).", file=sys.stderr)
@@ -220,7 +232,8 @@ def _finish(args) -> int:
         return 0
     try:
         written = apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width,
-                               progress=bar("Writing"), fmt=args.format)
+                               progress=bar("Writing"), fmt=args.format, codec=args.codec,
+                               dither=not args.no_dither)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
