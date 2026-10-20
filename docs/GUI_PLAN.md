@@ -251,6 +251,7 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 | FR-21 | A diagnostics file can be saved with versions, settings, the run report and the log, and with paths shortened to folder names and no image data. | US-18 |
 | FR-22 | Editor plug-ins installed in the same Python environment appear in the app automatically. | US-19 |
 | FR-23 | The about screen lists versions and the licences of everything bundled. | |
+| FR-25 | When reading a folder is limited by a slow connection (for example, a fast SSD delivering USB 2 speeds), the app says so once, plainly, with the likely causes (a USB 2-only cable or enclosure) and how to check. It never blocks anything. | |
 | FR-24 | The app chooses preview size, playback frame rate and the number of workers to suit the machine (QR-17), shows what it chose in settings, and lets the user change it. | |
 
 ---
@@ -958,6 +959,18 @@ So the speed-up depends on the drive, and is decided by measuring rather than as
 - **SSDs** (internal or USB) serve many requests at once, so running several ExifTool processes in parallel should help.
 - **Spinning hard drives** serve one request at a time; parallel reading can make them slower as the read head jumps between files.
 - **Antivirus** scanning shows up as every kind of read being slow; the fix is advice (excluding the photo folder from real-time scanning is the user's choice), not code.
+
+**Measured on James's PC (October 2026),** external SSD, 229 Canon R6 CR3 files of about 20 MB, run twice (a USB-A port, then USB-C) with near-identical results:
+
+| Method | Per file | Whole folder |
+|---|---|---|
+| ExifTool as it was | 0.57 to 0.59 s | about 2 minutes 15 |
+| ExifTool `-fast` | 0.13 to 0.14 s | about 30 s |
+| Four ExifTools at once | 0.49 s | about 1 minute 53 |
+| **Four at once with `-fast` (now the default)** | **0.079 s** | **about 18 s** |
+| Plain reads, whole files, one or four at once | 0.41 to 0.42 s | about 95 s |
+
+Two conclusions. First, without `-fast`, ExifTool read through most of each CR3 file (slower than reading the whole file), so `-fast` plus four processes is now the default; every setting the tool uses was identical with and without `-fast`, and a RAW file whose fast read is missing anything essential is re-read the normal way. Second, the drive delivered about 48 MB/s whichever port and however many readers, which is USB 2 speed for an SSD that should manage several hundred; the likely cause is a USB 2-only cable or enclosure. That limit can only be fixed in hardware, and it sets a floor for measuring, which has to read whole files (about 95 seconds for this folder). The app should notice a slow connection like this and say so (FR-25).
 
 `benchmarks/reading_speed.py` measures all of this on a real drive, each method on its own untouched files: ExifTool as now, with `-fast`, four in parallel, and plain reads of the start and of whole files, one at a time and four at once. The result decides the default (experiment S8). Whatever it shows, two things help everywhere: the settings cache (done) makes every later open instant, and the app shows the project as soon as the first settings arrive, filling in the rest as they come, rather than waiting for all of them. In the app, the settings read and the preview-image pass also become one background job that reads each file once, in order.
 

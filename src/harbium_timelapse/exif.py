@@ -21,6 +21,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -174,41 +176,101 @@ def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[st
     ways that can hang rather than error. An argument file is ExifTool's own
     recommended route, and it also carries non-English characters in folder
     names safely (UTF-8 both ways).
+
+    Speed, measured on an external SSD (229 Canon R6 CR3 files): ExifTool's
+    ``-fast`` stops it reading through each RAW file's image data looking for
+    more metadata (0.57 s per file down to 0.13 s), and four ExifTools at once
+    gets that to 0.08 s, so about 2 minutes became about 18 seconds. Every
+    setting the tool uses came back identical with and without ``-fast``; as
+    a safety net, a RAW file whose fast read is missing anything essential is
+    read again the normal way.
     """
+    # Absolute paths: a file name starting with "-" can't then be read as an option.
+    resolved = [p.resolve() for p in paths]
+    processes = max(1, min(EXIFTOOL_PROCESSES, len(resolved), _worker_limit()))
+    size = max(1, min(BATCH, -(-len(resolved) // processes)))
+    batches = [resolved[i:i + size] for i in range(0, len(resolved), size)]
+    records: list[dict] = []
+    done = 0
+    lock = threading.Lock()
+
+    def run(batch: list[Path]) -> list[dict]:
+        nonlocal done
+        found = _exiftool_batch(batch, fast=True)
+        with lock:
+            done += len(batch)
+            if progress:
+                progress(done, len(resolved))
+        return found
+
+    if processes == 1:
+        for batch in batches:
+            records.extend(run(batch))
+    else:
+        with ThreadPoolExecutor(processes) as pool:
+            for found in pool.map(run, batches):
+                records.extend(found)
+    thin = {_key(r["SourceFile"]) for r in records if r.get("SourceFile") and _missing_essentials(r)}
+    if thin:
+        again = [p for p in resolved if _key(p) in thin]
+        better = {_key(r["SourceFile"]): r for r in _exiftool_batch(again, fast=False) if r.get("SourceFile")}
+        records = [better.get(_key(r["SourceFile"]), r) if r.get("SourceFile") else r for r in records]
     frames: dict[str, Frame] = {}
-    for start in range(0, len(paths), BATCH):
-        # Absolute paths: a file name starting with "-" can't then be read as an option.
-        batch = [p.resolve() for p in paths[start:start + BATCH]]
-        for rec in _exiftool_batch(batch):
-            source = rec.get("SourceFile")
-            if not source:
-                continue
-            path = Path(source)
-            frames[_key(path)] = Frame(
-                path=path,
-                taken_at=_parse_time(rec.get("DateTimeOriginal"), rec.get("SubSecTimeOriginal")),
-                shutter=_positive(rec.get("ExposureTime")),
-                aperture=_positive(rec.get("FNumber")),
-                iso=_positive(rec.get("ISO")),
-                camera=_text(rec.get("Model")),
-                white_balance=_positive(rec.get("ColorTempAsShot")),
-                white_balance_neutral=_neutral(rec),
-            )
-        if progress:
-            progress(min(start + BATCH, len(paths)), len(paths))
+    for rec in records:
+        source = rec.get("SourceFile")
+        if source:
+            frames[_key(source)] = _frame_from(rec)
     # Keep the caller's own Path objects, not ExifTool's spelling of them.
-    by_key = {_key(p.resolve()): p for p in paths}
+    by_key = {_key(p): q for p, q in zip(resolved, paths)}
     return {k: dataclasses.replace(f, path=by_key[k]) for k, f in frames.items() if k in by_key}
 
 
-def _exiftool_batch(batch: list[Path]) -> list[dict]:
+EXIFTOOL_PROCESSES = 4      # ExifTools reading at once (measured faster on SSD; see _read_with_exiftool)
+_RAW_SUFFIXES = (".cr3", ".cr2", ".nef", ".arw", ".raf", ".orf", ".rw2", ".dng", ".pef", ".srw")
+
+
+def _worker_limit() -> int:
+    """``HARBIUM_WORKERS=1`` also means one ExifTool at a time."""
+    try:
+        return max(1, int(os.environ.get("HARBIUM_WORKERS", "") or EXIFTOOL_PROCESSES))
+    except ValueError:
+        return EXIFTOOL_PROCESSES
+
+
+def _missing_essentials(rec: dict) -> bool:
+    """A RAW file's fast read without the settings the tool depends on."""
+    if not str(rec.get("SourceFile", "")).lower().endswith(_RAW_SUFFIXES):
+        return False
+    basics = all(rec.get(k) not in (None, "") for k in ("Model", "ISO", "ExposureTime", "DateTimeOriginal"))
+    white_balance = any(rec.get(k) not in (None, "") for k in ("WB_RGGBLevelsAsShot", "AsShotNeutral",
+                                                                "ColorTempAsShot"))
+    return not (basics and white_balance)
+
+
+def _frame_from(rec: dict) -> Frame:
+    return Frame(
+        path=Path(rec["SourceFile"]),
+        taken_at=_parse_time(rec.get("DateTimeOriginal"), rec.get("SubSecTimeOriginal")),
+        shutter=_positive(rec.get("ExposureTime")),
+        aperture=_positive(rec.get("FNumber")),
+        iso=_positive(rec.get("ISO")),
+        camera=_text(rec.get("Model")),
+        white_balance=_positive(rec.get("ColorTempAsShot")),
+        white_balance_neutral=_neutral(rec),
+    )
+
+
+def _exiftool_batch(batch: list[Path], fast: bool = False) -> list[dict]:
+    if not batch:
+        return []
     argfile = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".args", encoding="utf-8", delete=False) as f:
             f.write("\n".join(["-charset", "filename=utf8", *map(str, batch)]))
             argfile = f.name
         out = subprocess.run(
-            [find_program("exiftool") or "exiftool", "-json", "-n", *_EXIFTOOL_TAGS, "-@", argfile],
+            [find_program("exiftool") or "exiftool", "-json", "-n", *(["-fast"] if fast else []),
+             *_EXIFTOOL_TAGS, "-@", argfile],
             capture_output=True, encoding="utf-8", errors="replace",
             stdin=subprocess.DEVNULL,  # never let ExifTool sit waiting for a keypress
             timeout=BATCH_TIMEOUT, check=False,

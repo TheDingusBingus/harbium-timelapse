@@ -270,3 +270,12 @@ Not covered: moving cameras (no clip in the dataset); compare with the paper's o
 `finish` gains `--codec h264|h265|prores` (H.265 10-bit yuv420p10le with hvc1 tag; ProRes 422 HQ prores_ks profile 3, yuv422p10le, .mov only; file type and encoder availability checked before measuring) and dither (on by default, `--no-dither`): `correct()` can output a different bit depth and adds triangular noise (−1..+1 level, zero mean, seeded per frame) before rounding to 8 bits; uncorrected channels pass through untouched. 10-bit video is fed `correct(..., out_dtype=uint16)` from the original frames, skipping 8-bit rounding.
 
 Measured (benchmarks/check_encoding.py, docs/BENCHMARK.md): on real dusk footage the encoder adds 0.0043 (H.264) / 0.0016 (H.265 10-bit) / 0.0003 (ProRes) stops of flicker; none visible. On a clean synthetic sky, banding staircase 0.28 source → 0.57 H.264 plain → 0.43 H.264 dithered → 0.26 H.265 10-bit. H.264 stays the default for compatibility.
+
+
+---
+
+## Addendum 7 — 20 Oct 2026: reading camera settings 7x faster
+
+S8 run on James's PC (external SSD, 229 R6 CR3s, USB-A and USB-C): ExifTool as before 0.57 to 0.59 s per file, `-fast` 0.13, four processes with `-fast` 0.079 (about 2 min 15 down to 18 s for the folder). Plain whole-file reads 0.42 s per file (about 48 MB/s) whatever the port or concurrency: a USB 2-speed bottleneck (cable or enclosure). The sandbox couldn't show the `-fast` effect because its files were cached; only the real drive could.
+
+`exif._read_with_exiftool` now runs four ExifTools at once (`EXIFTOOL_PROCESSES`; `HARBIUM_WORKERS=1` means one) with `-fast`, batches sized so all four share the work, and re-reads normally any RAW file whose fast read lacks Model, ISO, ExposureTime, DateTimeOriginal or a white-balance tag (verified identical on an 80D CR2; CR3 covered by the fallback).

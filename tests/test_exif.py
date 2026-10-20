@@ -59,4 +59,44 @@ def test_exiftool_reads_a_big_folder_with_a_long_awkward_path(tmp_path, monkeypa
     assert [f.path for f in frames] == paths
     assert all(f.shutter == pytest.approx(1 / 125) for f in frames)
     assert frames[-1].taken_at == start + timedelta(seconds=5 * 249)
-    assert seen == [(100, 250), (200, 250), (250, 250)]
+    assert len(seen) >= 2 and seen[-1] == (250, 250)                  # updates along the way, then complete
+    assert [i for i, _ in seen] == sorted(i for i, _ in seen)           # only ever rising
+
+
+def test_fast_reads_and_a_normal_reread_for_raw_files_missing_settings(tmp_path, monkeypatch):
+    """ExifTool -fast is used first; a RAW file whose fast read lacks essentials is read again normally."""
+    from harbium_timelapse import exif
+    calls = []
+    good = {"Model": "Canon EOS R6", "ISO": 400, "ExposureTime": 0.5, "DateTimeOriginal": "2026:10:01 18:00:00",
+            "WB_RGGBLevelsAsShot": "2000 1024 1024 1500"}
+    def fake(batch, fast=False):
+        calls.append((fast, sorted(p.name for p in batch)))
+        out = []
+        for p in batch:
+            rec = {"SourceFile": str(p), **good}
+            if fast and p.name == "B.CR3":
+                rec.pop("WB_RGGBLevelsAsShot")              # pretend -fast missed it for this file
+            if fast and p.name == "c.jpg":
+                rec = {"SourceFile": str(p), "Model": "export"}     # an export: not RAW, never re-read
+            out.append(rec)
+        return out
+    monkeypatch.setattr(exif, "_exiftool_batch", fake)
+    paths = [tmp_path / n for n in ("A.CR3", "B.CR3", "c.jpg")]
+    for p in paths:
+        p.write_bytes(b"x")
+    frames = exif._read_with_exiftool(paths, None)
+    assert all(fast for fast, _ in calls[:-1]) and calls[-1] == (False, ["B.CR3"])
+    assert frames[exif._key(paths[1].resolve())].white_balance_neutral is not None
+
+
+def test_one_exiftool_at_a_time_when_asked(tmp_path, monkeypatch):
+    from harbium_timelapse import exif
+    monkeypatch.setenv("HARBIUM_WORKERS", "1")
+    seen = []
+    monkeypatch.setattr(exif, "_exiftool_batch",
+                        lambda batch, fast=False: seen.append(len(batch)) or [{"SourceFile": str(p)} for p in batch])
+    paths = [tmp_path / f"f{i}.jpg" for i in range(10)]
+    for p in paths:
+        p.write_bytes(b"x")
+    exif._read_with_exiftool(paths, None)
+    assert seen == [10]                                       # one process, one batch
