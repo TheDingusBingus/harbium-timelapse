@@ -37,7 +37,7 @@ from timelapse_core import Sequence, blend_between, measure_light, suggest_keyfr
 from timelapse_core.keyframes import KeyframeSuggestion
 
 from .sidecar import get_exposure, read_sidecar, set_exposure, write_sidecar
-from .state import clear_ledger, keep_original, read_ledger
+from .state import STATE_DIR, keep_original, ledger_kept_in_step, read_ledger
 
 KEYFRAME_LABEL = "color:purple"
 
@@ -130,27 +130,26 @@ def blend(seq: Sequence, label: str = KEYFRAME_LABEL) -> BlendResult:
         raise ValueError(f"{len(missing)} frames have no RapidRAW sidecar (first: {missing[0]}). "
                          "Paste settings onto every frame first.")
     per_frame, keys, held = plan_blend(seq, label)
-    ledger = read_ledger(seq.folder)
-    steady_wb = {name: e for name, e in ledger.items() if "white_balance" in e}
     changed = 0
-    for f, adj in zip(seq, per_frame):
-        data = read_sidecar(f.path)
-        if f.name in steady_wb:          # white balance set by the white-balance command stays
-            adj = {**adj, "whiteBalance": steady_wb[f.name]["white_balance"]}
-        if data.get("adjustments") == adj:
-            continue
-        keep_original(f.path)
-        data["adjustments"] = adj
-        write_sidecar(f.path, data)
-        changed += 1
-    clear_ledger(seq.folder)
-    if steady_wb:   # keep what white balance needs to undo itself
-        from .sidecar import get_exposure
-        from .state import write_ledger
-        write_ledger(seq.folder, {
-            name: {"base": round(get_exposure(read_sidecar(seq.folder / name) or {}), 4), "applied": 0.0,
-                   **{k: v for k, v in e.items() if k.startswith("white_balance")}}
-            for name, e in steady_wb.items()})
+    with ledger_kept_in_step(seq.folder) as ledger:
+        steady_wb = {name: dict(e) for name, e in ledger.items() if "white_balance" in e}
+        for f, adj in zip(seq, per_frame, strict=True):
+            data = read_sidecar(f.path)
+            if f.name in steady_wb:          # white balance set by the white-balance command stays
+                adj = {**adj, "whiteBalance": steady_wb[f.name]["white_balance"]}
+            if data.get("adjustments") != adj:
+                keep_original(f.path)
+                data["adjustments"] = adj
+                write_sidecar(f.path, data)
+                changed += 1
+            # This frame now holds the blend, so no deflicker is on it any more. Recorded
+            # per frame, so an interrupted blend leaves an honest record.
+            wb = {k: v for k, v in steady_wb.get(f.name, {}).items() if k.startswith("white_balance")}
+            if wb:
+                ledger[f.name] = {"base": round(get_exposure(data), 4), "applied": 0.0, **wb}
+            else:
+                ledger.pop(f.name, None)
+    (seq.folder / STATE_DIR / "refine.json").unlink(missing_ok=True)
     return BlendResult([seq[i].name for i in keys], changed, held)
 
 

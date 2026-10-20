@@ -29,10 +29,11 @@ from timelapse_core import (
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
 from .sidecar import (
+    finite,
     get_exposure, get_temperature, read_sidecar, set_exposure, set_temperature, sidecar_path,
     with_sidecar_settings, write_sidecar,
 )
-from .state import clear_ledger, keep_original, read_ledger, write_ledger
+from .state import STATE_DIR, keep_original, ledger_kept_in_step, read_json, read_ledger, write_json
 _VIRTUAL_COPY = re.compile(r"\.[0-9a-f]{6}\.rrdata$")
 
 
@@ -212,16 +213,17 @@ def apply(p: Plan) -> int:
             "Paste settings onto every frame in RapidRAW first."
         )
 
-    ledger = read_ledger(p.folder)
+    for fp in p.frames:                       # every value checked before anything is written
+        finite(fp.exposure, "exposure")
 
-    for fp in p.frames:
-        keep_original(fp.frame.path)
-        data = read_sidecar(fp.frame.path)
-        set_exposure(data, fp.exposure)
-        write_sidecar(fp.frame.path, data)
-        ledger.setdefault(fp.frame.name, {}).update(base=round(fp.base, 4), applied=round(fp.correction, 4))
+    with ledger_kept_in_step(p.folder) as ledger:
+        for fp in p.frames:
+            keep_original(fp.frame.path)
+            data = read_sidecar(fp.frame.path)
+            set_exposure(data, fp.exposure)
+            write_sidecar(fp.frame.path, data)
+            ledger.setdefault(fp.frame.name, {}).update(base=round(fp.base, 4), applied=round(fp.correction, 4))
 
-    write_ledger(p.folder, ledger)
     (p.folder / ".timelapse-core" / "refine.json").unlink(missing_ok=True)  # a fresh deflicker: old refine passes no longer apply
     return len(p.frames)
 
@@ -229,34 +231,35 @@ def apply(p: Plan) -> int:
 def undo(folder: Path | str, colour_only: bool = False) -> int:
     """Take every deflicker and refine correction back out (exposure and
     colour). Your own edit stays. ``colour_only`` removes just refine's
-    Temperature corrections and keeps the exposure work."""
+    Temperature corrections and keeps the exposure work.
+
+    Each frame's record is updated as soon as its sidecar is written, so an
+    interrupted undo can simply be run again."""
     folder = Path(folder)
-    ledger = read_ledger(folder)
     changed = 0
-    for name, entry in ledger.items():
-        image = folder / name
-        data = read_sidecar(image)
-        if data is None:
-            continue
-        if not colour_only:
-            set_exposure(data, get_exposure(data) - entry["applied"])
-        if entry.get("applied_temp"):
-            set_temperature(data, get_temperature(data) - entry["applied_temp"])
+    with ledger_kept_in_step(folder) as ledger:
+        for name, entry in ledger.items():
+            image = folder / name
+            data = read_sidecar(image)
+            if data is None:
+                continue
+            if not colour_only:
+                set_exposure(data, get_exposure(data) - entry["applied"])
+            if entry.get("applied_temp"):
+                set_temperature(data, get_temperature(data) - entry["applied_temp"])
+            write_sidecar(image, data)
+            if not colour_only:
+                entry["base"], entry["applied"] = round(get_exposure(data), 4), 0.0
             entry["applied_temp"] = 0.0
-        write_sidecar(image, data)
-        changed += 1
+            changed += 1
+        if not colour_only:
+            # keep only what white balance needs to undo itself
+            for name in [n for n, e in ledger.items() if "white_balance_before" not in e]:
+                del ledger[name]
     if colour_only:
-        write_ledger(folder, ledger)
         _forget_colour_history(folder)
-    elif any("white_balance_before" in e for e in ledger.values()):
-        # Keep what white balance needs to undo itself; exposure is back to base.
-        kept = {name: {"base": round(get_exposure(read_sidecar(folder / name) or {}), 4), "applied": 0.0,
-                       **{k: v for k, v in e.items() if k.startswith("white_balance")}}
-                for name, e in ledger.items() if "white_balance_before" in e}
-        write_ledger(folder, kept)
-        (folder / ".timelapse-core" / "refine.json").unlink(missing_ok=True)
     else:
-        clear_ledger(folder)
+        (folder / STATE_DIR / "refine.json").unlink(missing_ok=True)
     return changed
 
 
@@ -265,11 +268,11 @@ def _forget_colour_history(folder: Path) -> None:
     path = folder / ".timelapse-core" / "refine.json"
     if not path.exists():
         return
-    history = json.loads(path.read_text(encoding="utf-8"))
+    history = read_json(path, "refine passes")
     for record in history.get("passes", []):
         for key in ("warmth", "applied_temp", "colour_target"):
             record.pop(key, None)
-    path.write_text(json.dumps(history), encoding="utf-8")
+    write_json(path, history, indent=None)
 
 
 # --- ledger -----------------------------------------------------------------

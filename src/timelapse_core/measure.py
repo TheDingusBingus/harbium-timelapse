@@ -86,8 +86,7 @@ def measure_light(
 
     profiles = np.empty((len(paths), _PERCENTS.size))
     warmth = np.empty(len(paths))
-    steps: list[float | None] = []
-    previous = None
+    chain = SteadyChain()
     for i, path in enumerate(paths):
         try:
             image, warmth[i] = _load(path, speed)
@@ -96,14 +95,11 @@ def measure_light(
         except Exception as e:
             raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
         profiles[i] = tone_profile(image)
-        current = steady_input(image)
-        if i:
-            steps.append(steady_change(previous, current))
-        previous = current
+        chain.add(steady_input(image))
         if progress:
             progress(i + 1, len(paths))
     band = brightness_from_profiles(profiles)
-    return (steady_series(steps, band) if steady else band), warmth
+    return (chain.series(band) if steady else band), warmth
 
 
 MIN_STEADY_PIXELS = 500   # fewer usable still pixels shared by two frames: fall back to the tone measure
@@ -144,19 +140,72 @@ def steady_change(previous: np.ndarray | None, current: np.ndarray) -> float | N
     return float(np.log2(c[still].sum() / p[still].sum()))
 
 
-def steady_series(steps: list, fallback: np.ndarray) -> np.ndarray:
-    """Chain frame-to-frame changes into one brightness per frame. Where two
-    frames couldn't be compared, the tone measure's change is used instead.
-    Kept at the same overall level as ``fallback``."""
-    fallback = np.asarray(fallback, dtype=np.float64)
-    out = np.empty(len(fallback))
-    if not len(out):
+def measurable(values: np.ndarray) -> bool:
+    """Enough pixels that are neither black nor blown to measure a frame by.
+    A lens cap, a black frame or a fully blown frame isn't."""
+    v = np.asarray(values)
+    return int(((v > BLACK) & (v < CLIPPED)).sum()) >= MIN_STEADY_PIXELS
+
+
+class SteadyChain:
+    """Builds a brightness series from the still part of the scene, one frame
+    at a time, keeping only the last measurable frame in memory.
+
+    A frame that can't be measured (black, blown) is skipped: the next frame
+    is compared with the last one that could be, so one bad frame can't
+    carry "unknown" into every frame after it. Skipped frames read as NaN.
+    """
+
+    def __init__(self) -> None:
+        self.reference: np.ndarray | None = None
+        self.steps: list[float | None] = []
+        self.usable: list[bool] = []
+
+    def add(self, current: np.ndarray) -> None:
+        if not measurable(current):
+            self.steps.append(None)
+            self.usable.append(False)
+            return
+        step = None if self.reference is None else steady_change(self.reference, current)
+        self.steps.append(step)
+        self.usable.append(True)
+        self.reference = current
+
+    def series(self, fallback: np.ndarray) -> np.ndarray:
+        """Chain the changes; where two frames couldn't be compared, the
+        whole-frame tone measure's change fills in. Same overall level as
+        ``fallback``; NaN for frames that couldn't be measured at all."""
+        fallback = np.asarray(fallback, dtype=np.float64)
+        out = np.full(len(fallback), np.nan)
+        prev = None
+        for i, (step, usable) in enumerate(zip(self.steps, self.usable, strict=True)):
+            if not usable:
+                continue
+            if prev is None:
+                out[i], prev = 0.0, i
+                continue
+            if step is None:
+                step = fallback[i] - fallback[prev]
+                if not np.isfinite(step):
+                    continue
+            out[i], prev = out[prev] + step, i
+        both = np.isfinite(out) & np.isfinite(fallback)
+        if both.any():
+            out += fallback[both].mean() - out[both].mean()
         return out
-    out[0] = 0.0
-    for i in range(1, len(out)):
-        step = steps[i - 1] if i - 1 < len(steps) else None
-        out[i] = out[i - 1] + (step if step is not None else fallback[i] - fallback[i - 1])
-    return out - np.nanmean(out) + np.nanmean(fallback)
+
+
+def fill_gaps(values) -> np.ndarray:
+    """Unknown (NaN) values replaced by a straight line between their known
+    neighbours, for maths that needs every frame. Raises if under two are known."""
+    y = np.asarray(values, dtype=np.float64)
+    known = np.isfinite(y)
+    if known.all():
+        return y.copy()
+    if known.sum() < 2:
+        raise ValueError("Couldn't measure enough frames: they're all black or all blown out.")
+    x = np.arange(len(y))
+    return np.interp(x, x[known], y[known])
 
 
 def brightness_of(linear_rgb: np.ndarray) -> float:

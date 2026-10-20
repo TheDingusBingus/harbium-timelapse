@@ -46,8 +46,8 @@ from timelapse_core import Sequence, smooth_brightness
 from timelapse_core.colour_temperature import kelvin_tint_from_neutral
 
 from .cameras import matrices_for
-from .sidecar import read_sidecar, write_sidecar
-from .state import keep_original, read_ledger, write_ledger
+from .sidecar import finite, read_sidecar, write_sidecar
+from .state import keep_original, ledger_kept_in_step
 
 DEFAULT_SMOOTHNESS = 50  # frames
 
@@ -156,36 +156,39 @@ def apply_white_balance(seq: Sequence, plan: WhiteBalancePlan) -> int:
     if missing:
         raise ValueError(f"{len(missing)} frames have no RapidRAW sidecar (first: {missing[0]}). "
                          "Paste settings onto every frame first.")
-    ledger = read_ledger(seq.folder)
-    for f, k, t in zip(seq, plan.kelvin, plan.tint):
-        tint = int(t) if t == int(t) else float(t)
-        data = read_sidecar(f.path)
-        adjustments = data.setdefault("adjustments", {})
-        entry = ledger.setdefault(f.name, {"base": float(adjustments.get("exposure") or 0.0), "applied": 0.0})
-        if "white_balance_before" not in entry:
-            entry["white_balance_before"] = adjustments.get("whiteBalance")
-        keep_original(f.path)
-        adjustments["whiteBalance"] = {"temperature": int(k), "tint": tint}
-        entry["white_balance"] = adjustments["whiteBalance"]
-        write_sidecar(f.path, data)
-    write_ledger(seq.folder, ledger)
+    for k, t in zip(plan.kelvin, plan.tint, strict=True):   # every value checked before anything is written
+        finite(k, "white balance")
+        finite(t, "tint")
+    with ledger_kept_in_step(seq.folder) as ledger:
+        for f, k, t in zip(seq, plan.kelvin, plan.tint, strict=True):
+            tint = int(t) if t == int(t) else float(t)
+            data = read_sidecar(f.path)
+            adjustments = data.setdefault("adjustments", {})
+            before = adjustments.get("whiteBalance")
+            keep_original(f.path)
+            adjustments["whiteBalance"] = {"temperature": int(k), "tint": tint}
+            write_sidecar(f.path, data)
+            # recorded only once the sidecar really holds it
+            entry = ledger.setdefault(f.name, {"base": float(adjustments.get("exposure") or 0.0), "applied": 0.0})
+            entry.setdefault("white_balance_before", before)
+            entry["white_balance"] = adjustments["whiteBalance"]
     return len(seq)
 
 
 def undo_white_balance(seq: Sequence) -> int:
     """Each frame back to the white balance it had before this tool set one."""
-    ledger = read_ledger(seq.folder)
     changed = 0
-    for f in seq:
-        entry = ledger.get(f.name)
-        if not entry or "white_balance_before" not in entry:
-            continue
-        data = read_sidecar(f.path)
-        if data is None:
-            continue
-        data.setdefault("adjustments", {})["whiteBalance"] = entry.pop("white_balance_before")
-        entry.pop("white_balance", None)
-        write_sidecar(f.path, data)
-        changed += 1
-    write_ledger(seq.folder, ledger)
+    with ledger_kept_in_step(seq.folder) as ledger:
+        for f in seq:
+            entry = ledger.get(f.name)
+            if not entry or "white_balance_before" not in entry:
+                continue
+            data = read_sidecar(f.path)
+            if data is None:
+                continue
+            data.setdefault("adjustments", {})["whiteBalance"] = entry["white_balance_before"]
+            write_sidecar(f.path, data)
+            entry.pop("white_balance_before")       # forgotten only once the sidecar is back
+            entry.pop("white_balance", None)
+            changed += 1
     return changed

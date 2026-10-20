@@ -109,6 +109,8 @@ class FlickerCorrections:
     - ``exposure``: how much to brighten (+) or darken (-) each frame
     - ``changes``: the exposure steps you made while shooting, which were
       blended into a gentle ramp rather than treated as flicker
+    - ``unmeasured``: frames that couldn't be measured (black, fully blown);
+      they get no correction (0) rather than a guess
     """
 
     frames: tuple[Frame, ...]
@@ -116,6 +118,7 @@ class FlickerCorrections:
     target: np.ndarray
     exposure: np.ndarray
     changes: tuple[ExposureChange, ...] = ()
+    unmeasured: tuple[int, ...] = ()
 
     def by_filename(self) -> dict[str, float]:
         return {f.name: float(e) for f, e in zip(self.frames, self.exposure)}
@@ -129,15 +132,22 @@ class FlickerCorrections:
         """
         if len(self.brightness) < 3:
             return 0.0
-        return float(np.std(np.diff(self.brightness)) / np.sqrt(2))
+        return _wobble(self.brightness)
 
     @property
     def flicker_after(self) -> float:
         """The same measure, once corrections are applied."""
         if len(self.brightness) < 3:
             return 0.0
-        return float(np.std(np.diff(self.brightness + self.exposure)) / np.sqrt(2))
+        return _wobble(self.brightness + self.exposure)
 
     @property
     def largest_correction(self) -> float:
-        return float(np.max(np.abs(self.exposure))) if len(self.exposure) else 0.0
+        return float(np.nanmax(np.abs(self.exposure))) if len(self.exposure) else 0.0
+
+
+def _wobble(values) -> float:
+    """Typical frame-to-frame change, ignoring frames that couldn't be measured."""
+    d = np.diff(np.asarray(values, dtype=np.float64))
+    d = d[np.isfinite(d)]
+    return float(np.std(d) / np.sqrt(2)) if d.size else 0.0

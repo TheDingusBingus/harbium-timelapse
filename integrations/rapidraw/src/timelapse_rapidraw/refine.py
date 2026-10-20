@@ -42,17 +42,17 @@ learned from your exports, as for exposure.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from timelapse_core import Sequence, measure_light, smooth_brightness
+from timelapse_core.measure import fill_gaps
 from timelapse_core.deflicker import DEFAULT_WINDOW
 from timelapse_core.sequencer import _natural_key
 
-from .sidecar import get_exposure, read_sidecar, set_exposure, write_sidecar
-from .state import STATE_DIR, keep_original, read_ledger, write_ledger
+from .sidecar import finite, get_exposure, read_sidecar, set_exposure, write_sidecar
+from .state import STATE_DIR, keep_original, ledger_kept_in_step, read_json, read_ledger, write_json
 
 HISTORY = "refine.json"
 INVISIBLE = 0.015       # stops of render flicker below which there's nothing to gain
@@ -79,6 +79,7 @@ class RefineResult:
     colour_in_render: float = float("nan")
     colour_strength: float = float("nan")     # warmth per +1 on Temperature (typical)
     colour_guessed: bool = False              # strength couldn't be estimated yet: a careful first step
+    unmeasured: tuple = ()                    # exported frames that couldn't be measured: left as they are
 
 
 def rendered_frames(folder: Path | str) -> list[Path]:
@@ -124,6 +125,13 @@ def refine(
             render_warmth = measured_warmth
     render = np.asarray(render_brightness, dtype=np.float64)
     warm = None if render_warmth is None or not colour else np.asarray(render_warmth, dtype=np.float64)
+    # Exported frames that couldn't be measured (black, blown) keep their
+    # corrections exactly as they are; the maths bridges them.
+    bad = ~np.isfinite(render) if warm is None else ~(np.isfinite(render) & np.isfinite(warm))
+    if bad.any():
+        render = fill_gaps(render)
+        if warm is not None:
+            warm = fill_gaps(warm)
 
     sidecars = [read_sidecar(f.path) or {} for f in seq]
     applied = np.array([ledger.get(f.name, {}).get("applied", 0.0) for f in seq])
@@ -176,21 +184,27 @@ def refine(
         colour_strength=float(np.nanmedian(colour_strength)) if fix_colour else float("nan"),
         colour_guessed=guessed,
     )
+    new_applied[bad] = applied[bad]
+    new_applied_t[bad] = applied_t[bad]
+    result = RefineResult(**{**result.__dict__, "unmeasured": tuple(int(i) for i in np.flatnonzero(bad))})
     if dry_run:
         return result
+    for b, a, bt, at in zip(base, new_applied, base_t, new_applied_t, strict=True):   # all checked first
+        finite(b + a, "exposure")
+        finite(bt + at, "temperature")
 
-    for f, data, b, a, bt, at in zip(seq, sidecars, base, new_applied, base_t, new_applied_t):
-        keep_original(f.path)
-        set_exposure(data, b + a)
-        if fix_colour:
-            t = round(float(bt + at), 2)
-            data.setdefault("adjustments", {})["temperature"] = int(t) if t == int(t) else t
-        write_sidecar(f.path, data)
-        entry = ledger.setdefault(f.name, {"base": 0.0, "applied": 0.0})
-        entry.update(base=round(float(b), 4), applied=round(float(a), 4))
-        if fix_colour or at:
-            entry["applied_temp"] = round(float(at), 3)
-    write_ledger(seq.folder, ledger)
+    with ledger_kept_in_step(seq.folder) as ledger:
+        for f, data, b, a, bt, at in zip(seq, sidecars, base, new_applied, base_t, new_applied_t, strict=True):
+            keep_original(f.path)
+            set_exposure(data, b + a)
+            if fix_colour:
+                t = round(float(bt + at), 2)
+                data.setdefault("adjustments", {})["temperature"] = int(t) if t == int(t) else t
+            write_sidecar(f.path, data)
+            entry = ledger.setdefault(f.name, {"base": 0.0, "applied": 0.0})
+            entry.update(base=round(float(b), 4), applied=round(float(a), 4))
+            if fix_colour or at:
+                entry["applied_temp"] = round(float(at), 3)
     record = {"render": render.round(5).tolist(), "applied": applied.round(5).tolist()}
     if fix_light:
         record["strength"] = np.round(strength, 4).tolist()
@@ -346,10 +360,11 @@ def _local(ratio: np.ndarray, window: int) -> np.ndarray:
 
 def _read_history(folder: Path) -> list:
     path = Path(folder) / STATE_DIR / HISTORY
-    return json.loads(path.read_text(encoding="utf-8")).get("passes", []) if path.exists() else []
+    if not path.exists():
+        return []
+    passes = read_json(path, "refine passes").get("passes", [])
+    return passes if isinstance(passes, list) else []
 
 
 def _write_history(folder: Path, passes: list) -> None:
-    path = Path(folder) / STATE_DIR / HISTORY
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"version": 1, "passes": passes}), encoding="utf-8")
+    write_json(Path(folder) / STATE_DIR / HISTORY, {"version": 1, "passes": passes}, indent=None)

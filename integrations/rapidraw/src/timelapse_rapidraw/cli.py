@@ -27,6 +27,19 @@ CLOSE_FIRST = "Reopen RapidRAW to see the changes."
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Every damaged-file or bad-input problem ends as a sentence, never a traceback."""
+    try:
+        return _main(argv)
+    except ValueError as e:          # includes LedgerDamaged
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nStopped. Anything already written is recorded, so you can run the command again.",
+              file=sys.stderr)
+        return 130
+
+
+def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="timelapse-rapidraw",
                                  description="Deflicker RapidRAW timelapses. Close RapidRAW before any command that changes sidecars.")
     sub = ap.add_subparsers(dest="command", required=True)

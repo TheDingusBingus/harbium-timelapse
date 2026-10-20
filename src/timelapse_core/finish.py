@@ -37,9 +37,9 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from .deflicker import DEFAULT_WINDOW, smooth_brightness
+from .deflicker import DEFAULT_WINDOW, check_window, smooth_brightness
 from .measure import (
-    LONG_EDGE, _PERCENTS, _srgb_to_linear, brightness_from_profiles, steady_change, steady_series,
+    CLIPPED, LONG_EDGE, _PERCENTS, SteadyChain, _srgb_to_linear, brightness_from_profiles,
     tone_profile,
 )
 from .render import RENDERABLE, ffmpeg_available
@@ -67,12 +67,19 @@ def finished_frames(folder: Path | str) -> list[Path]:
 class FinishPlan:
     """What finish found and will do. All values in stops."""
     frames: tuple[Path, ...]
-    measured: np.ndarray   # frames × (red, green, blue)
+    measured: np.ndarray   # frames × (red, green, blue); NaN where a frame couldn't be measured
     target: np.ndarray     # the smoothed journey, same shape
 
     @property
+    def unmeasured(self) -> tuple[int, ...]:
+        """Frames that couldn't be measured (black, fully blown): copied unchanged."""
+        return tuple(int(i) for i in np.flatnonzero(~np.isfinite(self.measured).all(axis=1)))
+
+    @property
     def gains(self) -> np.ndarray:
-        return self.target - self.measured
+        g = self.target - self.measured
+        g[~np.isfinite(g).all(axis=1)] = 0.0
+        return g
 
     @property
     def brightness_before(self) -> float:
@@ -92,11 +99,11 @@ class FinishPlan:
 
     @property
     def largest_brightness_correction(self) -> float:
-        return float(np.max(np.abs(self.gains @ LUMA)))
+        return float(np.max(np.abs(self.gains @ LUMA))) if len(self.frames) else 0.0
 
     @property
     def largest_colour_correction(self) -> float:
-        return float(np.max(np.abs(self.gains[:, 0] - self.gains[:, 2])))
+        return float(np.max(np.abs(self.gains[:, 0] - self.gains[:, 2]))) if len(self.frames) else 0.0
 
 
 def measure_channels(frames: list[Path], progress: Progress | None = None, steady: bool = True) -> np.ndarray:
@@ -106,20 +113,17 @@ def measure_channels(frames: list[Path], progress: Progress | None = None, stead
     since the previous frame, so walkers and cars can't sway it; the
     whole-frame tone measure fills in where two frames can't be compared."""
     profiles = np.empty((3, len(frames), _PERCENTS.size))
-    steps: list[list] = [[], [], []]
-    previous = None
+    chains = [SteadyChain(), SteadyChain(), SteadyChain()]
     for i, path in enumerate(frames):
         small = _small_linear(_read(path))
-        current = [np.where(small.max(axis=-1) >= 0.98, 1.0, small[..., c]) for c in range(3)]
+        blown = small.max(axis=-1) >= CLIPPED
         for c in range(3):
             profiles[c, i] = tone_profile(small[..., c])
-            if i:
-                steps[c].append(steady_change(previous[c], current[c]))
-        previous = current
+            chains[c].add(np.where(blown, 1.0, small[..., c]))
         if progress:
             progress(i + 1, len(frames))
     band = [brightness_from_profiles(profiles[c]) for c in range(3)]
-    return np.column_stack([steady_series(steps[c], band[c]) if steady else band[c] for c in range(3)])
+    return np.column_stack([chains[c].series(band[c]) if steady else band[c] for c in range(3)])
 
 
 def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool = True,
@@ -129,9 +133,12 @@ def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool =
     ``colour=False`` corrects brightness only: the same gain on all three
     channels, so colour is left exactly as exported.
     """
+    check_window(window)
     if measured is None:
         measured = measure_channels(frames, progress)
     measured = np.asarray(measured, dtype=np.float64)
+    if np.isfinite(measured).all(axis=1).sum() < 2:
+        raise ValueError("Couldn't measure enough frames: they're all black or all blown out.")
     if colour:
         target = np.column_stack([smooth_brightness(measured[:, c], window) for c in range(3)])
     else:
@@ -181,6 +188,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
 
 def correct(img: np.ndarray, gains_stops) -> np.ndarray:
     """One gain per channel, in linear light, through exact lookup tables."""
+    if not np.all(np.isfinite(np.asarray(gains_stops, dtype=np.float64))):
+        raise ValueError("Refusing to apply an unknown (non-finite) correction.")
     levels = _levels(img)
     v = np.arange(levels + 1, dtype=np.float64) / levels
     linear = _srgb_to_linear(v)
@@ -286,5 +295,6 @@ class _Encoder:
 
 
 def _wobble(values: np.ndarray) -> float:
-    v = np.asarray(values, dtype=np.float64)
-    return float(np.std(np.diff(v)) / np.sqrt(2)) if len(v) > 2 else 0.0
+    d = np.diff(np.asarray(values, dtype=np.float64))
+    d = d[np.isfinite(d)]
+    return float(np.std(d) / np.sqrt(2)) if d.size > 1 else 0.0

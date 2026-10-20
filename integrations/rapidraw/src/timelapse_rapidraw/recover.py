@@ -18,17 +18,17 @@ Two defences:
 
 from __future__ import annotations
 
-import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from timelapse_core import Sequence
 
-from .sidecar import (dump, get_exposure, get_temperature, read_sidecar, set_exposure,
+from .sidecar import (get_exposure, get_temperature, read_sidecar, set_exposure,
                       set_temperature, sidecar_path, write_sidecar)
-from .state import STATE_DIR, clear_ledger, read_ledger, write_ledger
+from .state import STATE_DIR, clear_ledger, read_json, read_ledger, write_json, write_ledger
+
+REBUILD_COPY = "rapidraw.rebuild.json"
 
 
 # --- is RapidRAW running? -----------------------------------------------------
@@ -94,7 +94,10 @@ def rebuild(seq: Sequence) -> tuple[int, int]:
 
     folder = seq.folder
     originals = folder / STATE_DIR / "originals"
-    ledger = read_ledger(folder)
+    # A safety copy of the record survives until the rebuild finishes, so an
+    # interrupted rebuild loses nothing: run it again and it carries on.
+    safety = folder / STATE_DIR / REBUILD_COPY
+    ledger = read_json(safety, "an unfinished rebuild").get("frames", {}) if safety.exists() else read_ledger(folder)
     if not ledger:
         raise ValueError("There's no deflicker ledger to rebuild from. Use restore instead.")
     missing = [f.name for f in seq if not (originals / sidecar_path(f.path).name).exists()]
@@ -104,15 +107,16 @@ def rebuild(seq: Sequence) -> tuple[int, int]:
 
     history_path = folder / STATE_DIR / "refine.json"
     history = history_path.read_text(encoding="utf-8") if history_path.exists() else None
+    write_json(safety, {"version": 1, "frames": ledger})
 
     # 1. Originals back, with today's labels (the originals predate some labelling).
     for f in seq:
         side = sidecar_path(f.path)
         labels = (read_sidecar(f.path) or {}).get("tags")
-        original = json.loads((originals / side.name).read_text(encoding="utf-8"))
+        original = read_json(originals / side.name, f"the original edit of {f.name}")
         if labels is not None:
             original["tags"] = labels
-        side.write_text(dump(original), encoding="utf-8")
+        write_sidecar(f.path, original)
 
     # 2. Blend between keyframes. The originals hold no deflicker, so the ledger
     #    is set aside first (it's held above), or the blend would subtract it.
@@ -138,4 +142,5 @@ def rebuild(seq: Sequence) -> tuple[int, int]:
     write_ledger(folder, ledger)
     if history is not None:
         history_path.write_text(history, encoding="utf-8")
+    safety.unlink(missing_ok=True)          # finished: the safety copy isn't needed
     return len(seq), len(keys)

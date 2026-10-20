@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -55,8 +56,17 @@ def get_exposure(data: dict) -> float:
     return float((data.get("adjustments") or {}).get("exposure") or 0.0)
 
 
+def finite(value: float, what: str) -> float:
+    """Refuse to write an unknown (NaN/infinite) number into a sidecar: RapidRAW
+    couldn't read the file afterwards."""
+    v = float(value)
+    if not math.isfinite(v):
+        raise ValueError(f"Refusing to write an unknown {what} value into a sidecar.")
+    return v
+
+
 def set_exposure(data: dict, stops: float) -> None:
-    value = round(float(stops), 4)
+    value = round(finite(stops, "exposure"), 4)
     # RapidRAW writes whole numbers without a decimal point (1, not 1.0). Match it,
     # so an undo leaves the file byte-for-byte as it was.
     data.setdefault("adjustments", {})["exposure"] = int(value) if value == int(value) else value
@@ -120,5 +130,5 @@ def get_temperature(data: dict) -> float:
 
 
 def set_temperature(data: dict, value: float) -> None:
-    v = round(float(value), 2)
+    v = round(finite(value, "temperature"), 2)
     data.setdefault("adjustments", {})["temperature"] = int(v) if v == int(v) else v

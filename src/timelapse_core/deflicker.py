@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .measure import Progress, measure_brightness
+from .measure import Progress, fill_gaps, measure_brightness
 from .ramping import find_exposure_changes
 from .types import FlickerCorrections, Sequence
 
@@ -63,25 +63,38 @@ def smooth_flicker(
     """
     if not 0.0 <= strength <= 1.0:
         raise ValueError("strength must be between 0 and 1")
+    check_window(window)
     if brightness is None:
         brightness = measure_brightness(sequence, speed=speed, progress=progress)
     brightness = np.asarray(brightness, dtype=np.float64)
     if len(brightness) != len(sequence):
         raise ValueError("brightness must have one value per frame")
 
-    yours, changes = find_exposure_changes(sequence.frames, brightness)
+    unmeasured = tuple(int(i) for i in np.flatnonzero(~np.isfinite(brightness)))
+    known = fill_gaps(brightness)          # bridges frames that couldn't be measured
+    yours, changes = find_exposure_changes(sequence.frames, known)
     if blend is None:
-        blend = max(3 * window, len(brightness) // 3)
+        blend = max(3 * window, len(known) // 3)
 
-    light = brightness - yours
+    light = known - yours
     target = smooth_brightness(light, window) + smooth_brightness(yours, blend, ignore_outliers=False)
+    exposure = strength * (target - known)
+    exposure[list(unmeasured)] = 0.0     # can't be measured: left exactly as it is
     return FlickerCorrections(
         frames=sequence.frames,
         brightness=brightness,
         target=target,
-        exposure=strength * (target - brightness),
+        exposure=exposure,
         changes=tuple(changes),
+        unmeasured=unmeasured,
     )
+
+
+def check_window(window: int) -> None:
+    """A window under 3 frames can't smooth anything; say so rather than
+    silently doing nothing."""
+    if int(window) < 3:
+        raise ValueError(f"The smoothing window must be at least 3 frames (got {window}).")
 
 
 def smooth_brightness(brightness, window: int = DEFAULT_WINDOW, ignore_outliers: bool = True) -> np.ndarray:
@@ -89,21 +102,25 @@ def smooth_brightness(brightness, window: int = DEFAULT_WINDOW, ignore_outliers:
     y = np.asarray(brightness, dtype=np.float64)
     n = len(y)
     window = min(int(window), n)
-    if window < 3:
+    known = np.isfinite(y)
+    if window < 3 or known.sum() < 2:
         return y.copy()
+    if not known.all():
+        y = fill_gaps(y)                 # unknown frames get no say (trust 0), bridged by neighbours
+    base = known.astype(np.float64)
 
-    trust = np.ones(n)
+    trust = base.copy()
     fit = y.copy()
     for _ in range(4 if ignore_outliers else 1):
         fit = _local_lines(y, window, trust)
         if not ignore_outliers:
             break
         residual = y - fit
-        spread = np.median(np.abs(residual))
+        spread = np.median(np.abs(residual[known]))
         if spread < 1e-9:
             break
         u = residual / (6.0 * spread)
-        trust = np.where(np.abs(u) < 1, (1 - u**2) ** 2, 0.0)
+        trust = base * np.where(np.abs(u) < 1, (1 - u**2) ** 2, 0.0)
     return fit
 
 

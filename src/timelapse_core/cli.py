@@ -17,6 +17,18 @@ from .sequencer import check_sequence, load_sequence
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Bad input ends as a sentence, never a traceback."""
+    try:
+        return _main(argv)
+    except ValueError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nStopped.", file=sys.stderr)
+        return 130
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="timelapse", description="Free timelapse processing.")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -103,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     for line in describe_changes(fix):
         print(line)
+    if fix.unmeasured:
+        print("  " + describe_unmeasured([fix.frames[i].name for i in fix.unmeasured]))
     print(f"  Flicker: {fix.flicker_before:.3f} stops before, {fix.flicker_after:.3f} after (typical frame-to-frame wobble)")
     print(f"  Largest correction: {fix.largest_correction:.3f} stops")
 
@@ -155,6 +169,8 @@ def _finish(args) -> int:
     except (ValueError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
+    if p.unmeasured:
+        print("  " + describe_unmeasured([p.frames[i].name for i in p.unmeasured]))
     print(f"  Brightness wobble: {p.brightness_before:.3f} stops now, {p.brightness_after:.3f} after")
     if not args.brightness_only:
         print(f"  Colour wobble:     {p.colour_before:.3f} now, {p.colour_after:.3f} after")
@@ -185,6 +201,13 @@ def _finish(args) -> int:
     if args.video:
         print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
     return 0
+
+
+def describe_unmeasured(names: list[str]) -> str:
+    """One plain sentence about frames that couldn't be measured."""
+    shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    return (f"Note: couldn't measure {len(names)} frame{'s' if len(names) != 1 else ''} ({shown}): "
+            "completely black or blown out. Left exactly as they are.")
 
 
 def describe_changes(fix) -> list[str]:
