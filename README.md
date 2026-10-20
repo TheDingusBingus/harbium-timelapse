@@ -72,7 +72,8 @@ A simple app with a window and a proper installer is on the to-do list, so you w
 
 ```text
 timelapse prepare FOLDER      white balance and deflicker, written into your editor's edits
-timelapse finish EXPORT       smooth the exported frames (add --video film.mp4 and/or --out FOLDER)
+timelapse finish EXPORT       smooth the exported frames (add --video film.mp4 and/or --out FOLDER;
+                              --codec h265 or prores for other video formats)
 timelapse undo FOLDER         take out everything prepare added
 timelapse check FOLDER        look over a folder before processing it
 timelapse deflicker FOLDER    work out the corrections, for any editor (add --csv file.csv to save them)
@@ -89,7 +90,7 @@ timelapse-rapidraw ...        extras for RapidRAW: keyframes, refine, export and
 - `h265` is 10-bit H.265: about the same file size as H.264, with smoother skies and gradients. Some Windows PCs need Microsoft's HEVC extension to play it.
 - `prores` is ProRes 422 HQ (10-bit, in a `.mov` file): close to lossless and much larger, made for cutting the film in a video editor.
 
-For the 10-bit formats, the correction goes to the encoder at 16-bit precision, so it never gets rounded to 8 bits on the way. Corrected 8-bit frames and H.264 video are dithered by default, which hides most of the banding that rounding would otherwise cause in smooth skies (`--no-dither` turns it off). The measurements behind these choices are in [docs/BENCHMARK.md](docs/BENCHMARK.md).
+For the 10-bit formats, the correction goes to the encoder at 16-bit precision, so it never gets rounded to 8 bits on the way. Corrected 8-bit frames and H.264 video are dithered by default, which reduces the banding that rounding can cause in smooth skies (`--no-dither` turns it off). H.264 smooths away part of the dither, so for skies where banding shows, H.265 10-bit is the better choice. The measurements behind these choices are in [docs/BENCHMARK.md](docs/BENCHMARK.md).
 
 Most commands have a `--dry-run` option that shows what would happen without changing anything, and `--help` lists everything else.
 
