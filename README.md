@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/44b26f32-7309-4671-a73f-376aaa684f92
 
 
 
-It's very much a work in progress. So far it has been tested properly on one real sequence: 229 frames from a Canon R6, shot from late afternoon into night, with a variable ND filter being turned, a few ISO changes, people walking through and car light trails, edited in RapidRAW on Windows. The finished video looked smooth, and measured smooth as well. I'd like to try it on plenty more footage before claiming much beyond that, so if you give it a go, I'd love to hear how you get on.
+It's very much a work in progress. So far it has been tested properly on one real sequence: 229 frames from a Canon R6, shot from late afternoon into night, with a variable ND filter being turned, a few ISO changes, people walking through and light trails, edited in RapidRAW on Windows. The finished video looked smooth, and measured smooth as well. I'd like to try it on plenty more footage before claiming much beyond that, so if you give it a go, I'd love to hear how you get on.
 
 ## How it works in practice
 
