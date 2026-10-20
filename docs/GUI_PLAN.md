@@ -224,7 +224,7 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-11 | The app suggests the most likely export folder (newest folder of frames near the RAW folder) and lets the user change it. | US-11 |
+| FR-11 | While the user grades, the app watches for the export: a new folder of frames near the RAW folder. It counts frames as they arrive, calls the export complete when the count matches the sequence and nothing has changed for a few seconds, then offers to finish. The user can choose a different folder at any time. | US-9, US-11 |
 | FR-12 | Video settings come from a short list: resolution (original, 4K, 1080p), frame rate (24, 25, 30), and optionally corrected frames as files. | US-10 |
 | FR-13 | Finish writes a report file next to its output describing every frame's measurement, target and correction, plus the flags. (library) | US-12, US-13 |
 
@@ -321,25 +321,30 @@ The targets below are for the typical machine; QR-16 sets the targets for the mi
 
 The subject is light measured over time, and the people using it judge colour for a living. That gives the visual direction two firm rules and one place to be distinctive.
 
-**Rule 1: neutral grey around images.** The interface surrounding frames is true neutral grey with no colour tint, in a dark and a light variant. This isn't a style choice; it's what colour-critical viewing requires.
+The app carries the Harbium brand (harbium.studio): a strict monochrome editorial palette of ink and bone, Cormorant Garamond for display, Inter for text, DM Mono for metadata, and the serif "H" mark.
 
-**Rule 2: colour means something.** Colour appears only where it carries information. The colour-balance track uses the axis it measures: amber for warmer, blue for cooler. Brightness is drawn in a near-white line. Flags use one accent colour reserved for "look here". No decorative colour anywhere else.
+**Rule 1: neutral grey around images.** The surround directly behind frames is true neutral grey with no tint, in a dark and a light variant. Brand bone is a warm off-white, so it's used for the interface but never directly around a photograph. This isn't a style choice; colour-critical viewing requires it.
 
-**The distinctive element: the timeline.** It's the one memorable thing in the app, drawn like a light meter's record over time: measured light as a fine line, the smoothing curve as a calm, slightly heavier line through it, corrections as a thin band showing the gap, exposure steps (ND turns, ISO changes) as small notches on the time axis, flags as small markers above the line. Everything else in the app stays quiet so this can be read at a glance.
+**Rule 2: colour means something.** The brand has no colour accent, which suits the rule: the interface is ink and bone, and colour appears only where it carries information. The colour-balance track uses the axis it measures: amber for warmer, blue for cooler. Flags are marked by shape (a diamond), not colour, which also serves colour-blind users. Status icons use shape (a tick, an exclamation mark) rather than green or amber.
 
-Starting tokens, to be tested on real screens:
+**The distinctive element: the timeline.** It's the one memorable thing in the app, drawn like a light meter's record over time: measured light as a fine warm-grey line, the smoothing curve as a heavier ink or bone line through it, exposure steps as small notches on the time axis, flags as diamonds above the line, the current frame as a quiet dotted line. Everything else stays quiet so this can be read at a glance.
+
+Tokens, from harbium.studio, as used in the mockup:
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| Surround | #3A3A3A | #8C8C8C | Behind frames (neutral grey, no tint) |
-| Panel | #2E2E2E | #EDEDED | Controls and lists |
-| Text | #F0F0F0 | #1C1C1C | Body text |
-| Measured line | #C8C8C8 | #4A4A4A | Light as measured |
-| Curve | #FFFFFF | #000000 | The smoothing curve |
-| Warm / cool | #E0A040 / #4F8FD8 | #B87A1E / #2E6CB8 | Colour-balance track |
-| Look here | #E05A8A | #B8326A | Flags and the primary action |
+| Surround | #3A3A3A | #8C8C8C | Behind frames only (neutral grey, no tint) |
+| Interface | #0A0A0A (ink) | #E8E4DB (bone) | Window background |
+| Panel | #111111 | #DED9CE | Raised areas, charts |
+| Line | #1F1F1F | #C7C1B5 | Borders and dividers |
+| Text | #E8E4DB (bone) | #0A0A0A (ink) | Body text, primary button |
+| Secondary text | #A8A39A | #5E5A52 | Labels and notes |
+| Measured line | #847F75 | #847F75 | Light as measured |
+| Warm / cool | #D9A24A / #6F9BD1 | #A86F12 / #2F63A3 | Colour-balance track only |
 
-Type: Atkinson Hyperlegible for everything. It was designed for legibility, its figures are very distinct (useful when people read numbers like 0.013), and it's openly licensed, so it can be bundled. Numbers use tabular figures so columns line up. Sentence case throughout, no all-caps labels.
+Contrast: text 15.6:1 on both themes, secondary text 7.9:1 (dark) and 5.4:1 (light), all above the 4.5:1 minimum (QR-10).
+
+Type: Cormorant Garamond for the wordmark and screen titles; Inter for everything else, with tabular figures so numbers line up; DM Mono for frame names and file paths, as the website uses it for metadata. All three are under the SIL Open Font Licence and can be bundled. Sentence case throughout; square corners (2 px), as on the site.
 
 Layout: left-aligned, one column of controls on the left, the large image or timeline on the right. The stage bar sits across the top and reflects a real sequence, so numbered steps are justified there and nowhere else.
 
@@ -511,24 +516,26 @@ Low-fidelity, to agree on structure before any visual design. Widths are indicat
 +--------------------------------------------------------------------------+
 ```
 
-### W4. Hand-off to the editor
+### W4. Hand-off to the editor: waiting for the export
 
 ```
 +--------------------------------------------------------------------------+
 |  (1) Folder  ---  (2) Prepare  ---  (3) Grade  ---  (4) Finish  --- (5)  |
 +--------------------------------------------------------------------------+
-| Corrections applied to 229 frames.                                       |
-|                                                                          |
-| Now in RapidRAW:                                                         |
-|  [ ] Open the folder (the corrections are already in place)              |
-|  [ ] Grade as you like. Avoid Dehaze: it reacts to exposure changes.     |
-|  [ ] Export every frame as JPEG into a new folder                        |
-|                                                                          |
-| When you've exported, come back here.        [ I've exported: Finish ]   |
+| Over to RapidRAW.                       | . Export arriving: 54 of 229   |
+| Corrections are in place on all 229     |   F:\...\salman shoot\final-export |
+| frames. Grade however you like, then    |   [=========                 ]   |
+| export every frame. This screen notices |                                |
+| when the export lands.                  |   (then)                       |
+|-----------------------------------------|   Found 229 exported frames.   |
+| Export every frame as JPEG into a new,  |   All there, nothing changing  |
+| empty folder next to the RAW files.     |   for a few seconds.           |
+| Leave Dehaze at zero on this one.       |   [ Finish now ] [ Not this    |
+| Your originals are untouched.           |                    folder ]    |
 +--------------------------------------------------------------------------+
 ```
 
-For Lightroom, the same screen shows "Select every frame > Metadata > Read Metadata from Files" as the first step, and the Prepare screen shows "Save Metadata to Files" as a checkbox that has to be ticked before Apply is enabled.
+There's nothing to tick off: the step completes when the work is actually done. The app watches the RAW folder's surroundings for a new folder of frames, counts them as they arrive, and calls the export complete when the count matches and nothing has changed for a few seconds. "Choose folder instead" is always available. For Lightroom, the first tip is "Select every frame, then Metadata > Read Metadata from Files", and the Prepare screen asks for "Save Metadata to Files" to be confirmed before Apply is enabled.
 
 ### W5. Finish
 

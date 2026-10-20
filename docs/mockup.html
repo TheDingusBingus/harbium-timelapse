@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbium Timelapse mockup</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=DM+Mono&family=Inter:wght@400;600&display=swap');
+/* Harbium brand: ink, bone, warm greys; Cormorant for display, Inter for text, DM Mono for metadata.
+   Behind photographs the surround stays neutral grey, never bone: tinted surroundings shift colour judgement. */
+:root {
+  color-scheme: light;
+  --surround: #8c8c8c;
+  --panel: #e8e4db;        /* bone */
+  --panel-2: #ded9ce;
+  --border: #c7c1b5;
+  --text: #0a0a0a;         /* ink */
+  --dim: #5e5a52;
+  --measured: #847f75;
+  --curve: #0a0a0a;
+  --warm: #a86f12;
+  --cool: #2f63a3;
+  --primary-bg: #0a0a0a;
+  --primary-text: #e8e4db;
+  --chart-bg: #f0ede6;
+  --viewer-text: #111111;
+  --viewer-btn: rgba(255,255,255,.4);
+  --viewer-border: rgba(0,0,0,.3);
+  --viewer-on-bg: #1c1c1c;
+  --viewer-on-text: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surround: #3a3a3a;
+    --panel: #0a0a0a;
+    --panel-2: #111111;
+    --border: #1f1f1f;
+    --text: #e8e4db;
+    --dim: #a8a39a;
+    --measured: #847f75;
+    --curve: #e8e4db;
+    --warm: #d9a24a;
+    --cool: #6f9bd1;
+    --primary-bg: #e8e4db;
+    --primary-text: #0a0a0a;
+    --chart-bg: #111111;
+    --viewer-text: #f0f0f0;
+    --viewer-btn: rgba(255,255,255,.12);
+    --viewer-border: rgba(255,255,255,.25);
+    --viewer-on-bg: #ffffff;
+    --viewer-on-text: #1c1c1c;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--panel); color: var(--text);
+  font-size: 15px; line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+button, input { font: inherit; color: inherit; }
+header {
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+}
+header .app { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: .01em; display: flex; align-items: center; gap: 10px; }
+header .app .sub { font-family: 'Inter', system-ui, sans-serif; font-size: 14px; color: var(--dim); font-weight: 400; }
+.mark { width: 26px; height: 26px; flex: none; }
+.mono, .path, .frame .cap { font-family: 'DM Mono', ui-monospace, monospace; font-size: 13px; }
+header .project { color: var(--dim); }
+header .spacer { flex: 1; }
+header a { color: var(--dim); text-decoration: none; cursor: pointer; }
+nav.stages {
+  display: flex; gap: 4px; padding: 8px 20px; border-bottom: 1px solid var(--border);
+  overflow-x: auto; white-space: nowrap;
+}
+nav.stages button {
+  background: none; border: 0; padding: 6px 10px; border-radius: 4px; cursor: pointer; color: var(--dim);
+}
+nav.stages button .n {
+  display: inline-block; width: 1.5em; height: 1.5em; line-height: 1.5em; text-align: center;
+  border-radius: 50%; border: 1px solid var(--border); margin-right: 6px; font-size: 13px;
+}
+nav.stages button.done .n { background: var(--text); color: var(--panel); border-color: var(--text); }
+nav.stages button.current { color: var(--text); font-weight: 700; }
+nav.stages button.current .n { border-color: var(--text); }
+main { padding: 20px; }
+.screen { display: none; }
+.screen.on { display: block; }
+.cols { display: grid; grid-template-columns: 320px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+.side > * + * { margin-top: 16px; }
+h1 { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 500; font-size: 30px; line-height: 1.15; margin: 0 0 8px; }
+h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+p { margin: 0 0 10px; max-width: 70ch; }
+.dim { color: var(--dim); }
+.btn {
+  border: 1px solid var(--border); background: var(--panel-2); padding: 8px 14px; border-radius: 2px; cursor: pointer;
+}
+.btn.primary { background: var(--primary-bg); color: var(--primary-text); border-color: var(--primary-bg); font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:focus-visible, nav.stages button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.drop {
+  border: 1px dashed var(--dim); border-radius: 2px; padding: 48px 20px; text-align: center; margin-bottom: 24px;
+}
+.list { border-top: 1px solid var(--border); }
+.list .item {
+  display: grid; grid-template-columns: 1fr auto auto auto; gap: 16px; padding: 10px 2px;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.list .item:hover { background: var(--panel-2); }
+@media (max-width: 600px) { .list .item { grid-template-columns: 1fr auto; } .list .item .hide-s { display: none; } }
+.facts { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+.facts div span { display: block; color: var(--dim); font-size: 13px; }
+.check { display: grid; grid-template-columns: 26px 1fr; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.check .i { font-weight: 700; }
+.check .i { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--text); display: inline-grid; place-items: center; font-size: 12px; }
+.check .i.ok { background: var(--text); color: var(--panel); }
+.chartbox { background: var(--chart-bg); border: 1px solid var(--border); border-radius: 2px; padding: 10px 12px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin-bottom: 4px; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+canvas { display: block; width: 100%; }
+.slider { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-size: 13px; color: var(--dim); }
+input[type=range] { width: 100%; accent-color: var(--text); }
+.toggle { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.status { color: var(--dim); }
+.progress { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.progress div { height: 100%; width: 0; background: var(--text); transition: width .1s linear; }
+.checklist label { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+.tips { margin: 14px 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.tips li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.watch { margin-top: 18px; padding: 16px; border: 1px solid var(--border); background: var(--panel-2); }
+.watch .found { font-size: 17px; margin-bottom: 10px; }
+.pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text); margin-right: 8px; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.field { display: grid; grid-template-columns: 140px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: center; }
+@media (max-width: 600px) { .field { grid-template-columns: 1fr; } }
+.choices { display: flex; gap: 14px; flex-wrap: wrap; }
+.choices label { display: flex; gap: 6px; align-items: center; }
+.path { overflow-wrap: anywhere; }
+
+/* review */
+.viewer { background: var(--surround); border-radius: 2px; padding: 12px; }
+.triptych { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 10px; align-items: center; }
+@media (max-width: 700px) { .triptych { grid-template-columns: 1fr; } .triptych .side-frame { display: none; } }
+.frame { position: relative; }
+.frame canvas { border-radius: 4px; }
+.frame .cap {
+  position: absolute; left: 6px; top: 6px; font-size: 12px; padding: 2px 6px; border-radius: 3px;
+  background: rgba(0,0,0,.55); color: #fff;
+}
+.frame.main .cap.state { left: auto; right: 6px; }
+.viewer-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; color: var(--viewer-text); }
+.viewer-bar .btn { background: var(--viewer-btn); border-color: var(--viewer-border); color: var(--viewer-text); }
+.viewer-bar .btn.on { background: var(--viewer-on-bg); color: var(--viewer-on-text); }
+.viewer-bar .note { margin-left: auto; font-size: 13px; }
+.flagbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.keys { font-size: 12px; color: var(--dim); }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  background: var(--text); color: var(--panel); padding: 8px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s;
+  pointer-events: none;
+}
+.toast.on { opacity: 1; }
+.mock-note { font-size: 12px; color: var(--dim); text-align: center; padding: 12px; }
+@media (prefers-reduced-motion: reduce) { .progress div, .toast { transition: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="app"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" fill="var(--text)"/><text x="16" y="23" font-family="Cormorant Garamond, Georgia, serif" font-size="22" text-anchor="middle" fill="var(--panel)">H</text></svg>Harbium <span class="sub">Timelapse</span></span>
+  <span class="project" id="projectName">dusk shoot / timelapse photos</span>
+  <span class="spacer"></span>
+  <a onclick="toast('Settings: appearance, default video, check for a new version, diagnostics')">Settings</a>
+  <a onclick="toast('Help opens the guide for the current step')">Help</a>
+</header>
+
+<nav class="stages" id="stages" aria-label="Steps"></nav>
+
+<main>
+
+<!-- START -->
+<section class="screen" id="s-start">
+  <div class="drop" id="drop">
+    <h1>Drop a folder of timelapse frames here</h1>
+    <p class="dim" style="margin:0 auto 14px">RAW files or exported JPEGs. Nothing in the folder is changed until you say so.</p>
+    <div class="row" style="justify-content:center">
+      <button class="btn primary" onclick="openProject()">Choose folder</button>
+      <button class="btn" onclick="openProject(true)">Try the sample sequence</button>
+    </div>
+  </div>
+  <h2>Recent</h2>
+  <div class="list">
+    <div class="item" onclick="openProject()"><span>dusk shoot / timelapse photos</span><span class="hide-s dim">229 frames</span><span>Finished</span><span class="hide-s dim">20 Oct</span></div>
+    <div class="item" onclick="openProject()"><span>beach sunrise</span><span class="hide-s dim">540 frames</span><span>Prepared</span><span class="hide-s dim">12 Oct</span></div>
+    <div class="item" onclick="openProject()"><span>conference hall setup</span><span class="hide-s dim">1,180 frames</span><span>Opened</span><span class="hide-s dim">3 Oct</span></div>
+  </div>
+</section>
+
+<!-- FOLDER -->
+<section class="screen" id="s-folder">
+  <div class="facts">
+    <div><span>Frames</span>229</div>
+    <div><span>Camera</span>Canon EOS R6</div>
+    <div><span>Shot</span>16:42 to 17:58</div>
+    <div><span>Editor</span>RapidRAW</div>
+  </div>
+  <h2>Folder check</h2>
+  <div class="check"><span class="i ok">✓</span><span>All frames are the same size and from one camera.</span></div>
+  <div class="check"><span class="i ok">✓</span><span>No missing frames: one every 20 seconds throughout.</span></div>
+  <div class="check"><span class="i">!</span><span>3 exposure changes found (ISO 400 to 800, two shutter changes). They'll be smoothed into gentle ramps.</span></div>
+  <div class="check"><span class="i">!</span><span>Frame 181A1659 jumps 1.07 stops brighter with no setting change, most likely an ND filter being turned. Nothing to do; prepare handles it.</span></div>
+  <div class="check"><span class="i ok">✓</span><span>The camera stays still (a tripod shot), so the measurement can be trusted.</span></div>
+  <div class="actions"><button class="btn primary" onclick="go('prepare')">Next: preview corrections</button></div>
+</section>
+
+<!-- PREPARE -->
+<section class="screen" id="s-prepare">
+  <div class="cols">
+    <div class="side">
+      <div>
+        <h1>Prepare</h1>
+        <p class="dim">The light as measured from your RAW files, and the smooth curve the corrections will follow. Nothing has been changed yet.</p>
+      </div>
+      <div class="toggle"><span>Smooth the camera's auto white balance</span><input type="checkbox" checked id="wb" onchange="drawPrepare()" aria-label="Smooth white balance"></div>
+      <div>
+        <div class="slider"><span>Steady</span><input type="range" min="7" max="61" step="2" value="25" id="smoothP" oninput="smoothChanged('P')" aria-label="Smoothness"><span>Follows the light</span></div>
+        <p class="dim" style="font-size:13px;margin-top:6px" id="smoothNoteP"></p>
+      </div>
+      <div id="prepStats" class="dim" style="font-size:13px"></div>
+      <div id="prepProgress" style="display:none">
+        <div class="progress"><div id="prepBar"></div></div>
+        <p class="status" id="prepStatus" style="margin-top:6px"></p>
+      </div>
+      <div class="actions" id="prepActions">
+        <button class="btn" onclick="toast('Undo prepare: puts every edit file back exactly as it was')">Undo</button>
+        <button class="btn primary" id="applyBtn" onclick="runJob('prep')">Apply corrections</button>
+      </div>
+    </div>
+    <div>
+      <div class="chartbox">
+        <div class="legend"><span><i style="border-color:var(--measured)"></i>Measured</span><span><i style="border-color:var(--curve);border-top-width:3px"></i>Smoothing curve</span><span>▲ Exposure change</span></div>
+        <canvas id="cPrepB" height="230" aria-label="Brightness chart"></canvas>
+        <div class="legend" style="margin-top:8px"><span><i style="border-color:var(--warm)"></i>Warmer</span><span><i style="border-color:var(--cool)"></i>Cooler</span><span>White balance, as shot and smoothed</span></div>
+        <canvas id="cPrepC" height="90" aria-label="Colour balance chart"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GRADE -->
+<section class="screen" id="s-grade">
+  <div class="cols">
+    <div>
+      <h1>Over to RapidRAW.</h1>
+      <p class="dim">Corrections are in place on all 229 frames. Grade the sequence however you like, then export every frame. This screen notices when the export lands.</p>
+      <ul class="tips">
+        <li>Export every frame as JPEG into a new, empty folder next to the RAW files.</li>
+        <li>Leave Dehaze at zero on this one. It reacts to the exposure changes and makes contrast jump.</li>
+        <li>Your originals are untouched, and every edit file was backed up before it changed.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="watch" id="watch"></div>
+    </div>
+  </div>
+</section>
+
+<!-- FINISH -->
+<section class="screen" id="s-finish">
+  <h1>Finish</h1>
+  <p class="dim">Smooths whatever flicker is left in your export and makes the video.</p>
+  <div class="field"><span>Exported frames</span><span class="row"><span class="path">F:\Photography\…\salman shoot\final-export</span><span class="dim">229 frames</span><button class="btn" onclick="toast('Choose another export folder')">Change</button></span></div>
+  <div class="field"><span>Video</span><span class="choices"><label><input type="radio" name="res"> Original size</label><label><input type="radio" name="res" checked> 4K</label><label><input type="radio" name="res"> 1080p</label></span></div>
+  <div class="field"><span>Frame rate</span><span class="choices"><label><input type="radio" name="fps" checked> 24</label><label><input type="radio" name="fps"> 25</label><label><input type="radio" name="fps"> 30</label></span></div>
+  <div class="field"><span>Save to</span><span class="row"><span class="path">C:\Users\James\Videos\dusk shoot.mp4</span><button class="btn" onclick="toast('Choose where to save the video')">Change</button></span></div>
+  <div class="field"><span>Corrected frames</span><span class="choices"><label><input type="checkbox"> Also save them as files</label></span></div>
+  <div id="finProgress" style="display:none;margin-top:14px">
+    <div class="progress"><div id="finBar"></div></div>
+    <p class="status" id="finStatus" style="margin-top:6px"></p>
+  </div>
+  <div class="actions" id="finActions"><span class="dim" style="font-size:13px">About 1.6 GB needed; 212 GB free.</span><button class="btn primary" onclick="runJob('fin')">Finish video</button></div>
+</section>
+
+<!-- REVIEW -->
+<section class="screen" id="s-review">
+  <div class="viewer">
+    <div class="triptych">
+      <div class="frame side-frame"><canvas id="fPrev" height="200" data-aspect="1.5"></canvas><span class="cap" id="capPrev"></span></div>
+      <div class="frame main"><canvas id="fCur" height="320" data-aspect="1.5"></canvas><span class="cap" id="capCur"></span><span class="cap state" id="capState"></span></div>
+      <div class="frame side-frame"><canvas id="fNext" height="200" data-aspect="1.5"></canvas><span class="cap" id="capNext"></span></div>
+    </div>
+    <div class="viewer-bar">
+      <button class="btn" id="bBefore" onclick="setAfter(false)">Before</button>
+      <button class="btn on" id="bAfter" onclick="setAfter(true)">After</button>
+      <button class="btn" id="bBlink" onclick="toggleBlink()">Blink</button>
+      <button class="btn" id="bPlay" onclick="togglePlay()">Play</button>
+      <span class="note" id="frameNote"></span>
+    </div>
+  </div>
+  <div class="chartbox" style="margin-top:14px">
+    <div class="legend"><span><i style="border-color:var(--measured)"></i>Your export</span><span><i style="border-color:var(--curve);border-top-width:3px"></i>After finishing</span><span>◆ Worth a look</span><span>? Can't judge (ends)</span></div>
+    <canvas id="cRev" height="200" aria-label="Timeline: tap to choose a frame"></canvas>
+  </div>
+  <div class="flagbar">
+    <span id="flagCount"></span>
+    <button class="btn" onclick="nextFlag()">Next</button>
+    <button class="btn" id="fineBtn" onclick="looksFine()">Looks fine</button>
+    <span style="flex:1"></span>
+    <div class="slider" style="min-width:260px"><span>Steady</span><input type="range" min="7" max="61" step="2" value="25" id="smoothR" oninput="smoothChanged('R')" aria-label="Smoothness"><span>Follows the light</span></div>
+    <button class="btn primary" id="reapply" disabled onclick="runReapply()">Apply changes</button>
+  </div>
+  <p class="keys">Keys: ← → step a frame, F next flag, B blink, Space play.</p>
+</section>
+
+</main>
+<p class="mock-note">Mockup with made-up data. Frames are a drawn stand-in for a dusk scene.</p>
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------------- data: a made-up dusk sequence ----------------
+const N = 229, ND = 80;
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const t = i => i / (N - 1);
+const light = Array.from({length: N}, (_, i) => 0.35 * Math.exp(-(((i - 12) / 14) ** 2)) - 2.6 / (1 + Math.exp(-(i - 150) / 28)) + 0.4);
+const flick = Array.from({length: N}, () => 0.07 * gauss());
+const steps = [{i: 46, s: 0.33, why: 'ISO 400 to 800'}, {i: ND, s: 1.07, why: 'ND filter turned'}, {i: 171, s: 0.5, why: 'Shutter 1/4 to 1/2'}];
+const stepOf = i => steps.reduce((a, s) => a + (i >= s.i ? s.s : 0), 0);
+const measuredRaw = light.map((v, i) => v + flick[i] + stepOf(i));             // what the RAW files show
+const warmRaw = Array.from({length: N}, (_, i) => 0.15 - 0.45 * t(i) + 0.12 * gauss()); // auto WB jitter
+const exportB = light.map((v, i) => v + 0.035 * gauss());                     // after prepare + grading
+const exportW = warmRaw.map((v, i) => 0.25 - 0.35 * t(i) + 0.03 * gauss());
+const walkers = {121: -0.045, 166: 0.04};                                      // planted local changes
+
+function smooth(y, w) {           // gaussian-weighted local average; edges handled by renormalising
+  const h = w / 2.5, out = new Array(y.length);
+  for (let i = 0; i < y.length; i++) {
+    let s = 0, k = 0;
+    for (let j = Math.max(0, i - w); j <= Math.min(y.length - 1, i + w); j++) {
+      const wt = Math.exp(-0.5 * (((j - i) / h) ** 2)); s += wt * y[j]; k += wt;
+    }
+    out[i] = s / k;
+  }
+  return out;
+}
+const wobble = y => { let s = 0; for (let i = 2; i < y.length; i++) { const d = y[i] - 2 * y[i-1] + y[i-2]; s += d * d; } return Math.sqrt(s / (y.length - 2) / 6); };
+
+const state = {
+  stage: 'start', done: new Set(), smoothP: 25, smoothR: 25, appliedR: 25,
+  cur: 121, after: true, blink: null, play: null, fine: new Set(), job: null,
+};
+
+// ---------------- stages ----------------
+const STAGES = [['folder', 'Folder'], ['prepare', 'Prepare'], ['grade', 'Grade'], ['finish', 'Finish'], ['review', 'Review']];
+function renderStages() {
+  const nav = document.getElementById('stages');
+  nav.innerHTML = '';
+  STAGES.forEach(([id, label], k) => {
+    const b = document.createElement('button');
+    b.innerHTML = `<span class="n">${state.done.has(id) ? '✓' : k + 1}</span>${label}`;
+    if (state.done.has(id)) b.classList.add('done');
+    if (state.stage === id) { b.classList.add('current'); b.setAttribute('aria-current', 'step'); }
+    b.onclick = () => go(id);
+    nav.appendChild(b);
+  });
+  nav.style.display = state.stage === 'start' ? 'none' : 'flex';
+}
+function go(id) {
+  stopMotion(); stopWatch();
+  state.stage = id;
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 's-' + id));
+  renderStages();
+  requestAnimationFrame(() => { if (id === 'prepare') drawPrepare(); if (id === 'review') drawReview(); if (id === 'grade') startWatch(); });
+}
+function openProject(sample) {
+  document.getElementById('projectName').textContent = sample ? 'sample sequence (dusk, 229 frames)' : 'dusk shoot / timelapse photos';
+  state.done = new Set(); go('folder'); state.done.add('folder'); renderStages();
+}
+
+// ---------------- charts ----------------
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function prepCanvas(c) {
+  // remember the intended height once: on high-density screens the pixel height is larger than the display height
+  if (!c.dataset.h) c.dataset.h = c.getAttribute('height');
+  const r = devicePixelRatio || 1, w = c.clientWidth, h = c.dataset.aspect ? Math.round(w / +c.dataset.aspect) : +c.dataset.h;
+  c.width = w * r; c.height = h * r; c.style.height = h + 'px';
+  const g = c.getContext('2d'); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  return [g, w, h];
+}
+function line(g, ys, x, y, color, width, dash) {
+  g.beginPath(); g.strokeStyle = color; g.lineWidth = width; g.setLineDash(dash || []);
+  ys.forEach((v, i) => i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v))); g.stroke(); g.setLineDash([]);
+}
+function axes(g, w, h, lo, hi, pad, unit) {
+  g.fillStyle = css('--dim'); g.font = '12px Inter, system-ui';
+  g.strokeStyle = css('--border'); g.lineWidth = 1;
+  for (let v = Math.ceil(lo); v <= hi; v++) {
+    const yy = pad.t + (hi - v) / (hi - lo) * (h - pad.t - pad.b);
+    g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(w - pad.r, yy); g.stroke();
+    g.fillText((v > 0 ? '+' : '') + v + unit, 2, yy + 4);
+  }
+}
+
+function drawPrepare() {
+  const c = document.getElementById('cPrepB'); if (!c.clientWidth) return;
+  const [g, w, h] = prepCanvas(c);
+  const pad = {l: 40, r: 8, t: 10, b: 22}, lo = -1, hi = 2.2;
+  const x = i => pad.l + i / (N - 1) * (w - pad.l - pad.r), y = v => pad.t + (hi - v) / (hi - lo) * (h - pad.t - pad.b);
+  axes(g, w, h, lo, hi, pad, '');
+  // fast changes go, slow ones stay: exposure steps you made become gentle ramps, the light keeps its own pace
+  const ramp = smooth(Array.from({length: N}, (_, i) => stepOf(i)), 10);
+  const target = smooth(measuredRaw.map((v, i) => v - stepOf(i)), state.smoothP).map((v, i) => v + ramp[i]);
+  line(g, measuredRaw, x, y, css('--measured'), 1.2);
+  line(g, target, x, y, css('--curve'), 2.6);
+  g.fillStyle = css('--text'); g.font = '12px Inter, system-ui';
+  steps.forEach(s => { g.fillText('▲', x(s.i) - 5, h - 6); });
+  g.fillStyle = css('--dim'); g.fillText('frame 1', pad.l, h - 6); g.fillText('229', w - pad.r - 22, h - 6);
+  // colour track
+  const cc = document.getElementById('cPrepC'); const [g2, w2, h2] = prepCanvas(cc);
+  const y2 = v => h2 / 2 - v * h2 * 0.9, x2 = i => pad.l + i / (N - 1) * (w2 - pad.l - pad.r);
+  g2.strokeStyle = css('--border'); g2.beginPath(); g2.moveTo(pad.l, h2 / 2); g2.lineTo(w2 - pad.r, h2 / 2); g2.stroke();
+  for (let i = 1; i < N; i++) {
+    g2.strokeStyle = warmRaw[i] > 0 ? css('--warm') : css('--cool'); g2.lineWidth = 1;
+    g2.beginPath(); g2.moveTo(x2(i - 1), y2(warmRaw[i - 1])); g2.lineTo(x2(i), y2(warmRaw[i])); g2.stroke();
+  }
+  if (document.getElementById('wb').checked) line(g2, smooth(warmRaw, 50), x2, y2, css('--curve'), 2.4);
+  const corr = measuredRaw.map((v, i) => target[i] - v);
+  const biggest = corr.reduce((a, v) => Math.max(a, Math.abs(v)), 0);
+  document.getElementById('prepStats').textContent =
+    `Frame-to-frame wobble now ${wobble(measuredRaw).toFixed(3)} stops; after ${wobble(target).toFixed(3)}. Largest correction ${biggest.toFixed(2)} stops, at the ND filter turn.`;
+  document.getElementById('smoothNoteP').textContent =
+    state.smoothP < 15 ? 'Follows quick changes in the light, removes less flicker.' : state.smoothP > 41 ? 'Very steady. Fast real changes (a cloud, a light switching on) will be smoothed too.' : 'Balanced: removes flicker, keeps the light\'s own pace.';
+}
+
+// ---------------- review ----------------
+function afterSeries() {
+  const s = smooth(exportB, state.smoothR);
+  return s.map((v, i) => v + (walkers[i] || 0) + 0.004 * Math.sin(i * 1.7));
+}
+function flagsOf(y) {
+  const f = [];
+  for (let i = 2; i < N - 2; i++) {
+    // a ramp passes through the midpoint of its neighbours, however steep; a spike doesn't
+    if (Math.abs(y[i] - (y[i - 1] + y[i + 1]) / 2) > 0.025) f.push(i);
+  }
+  return f;
+}
+function drawReview() {
+  const c = document.getElementById('cRev'); if (!c.clientWidth) return;
+  const [g, w, h] = prepCanvas(c);
+  const pad = {l: 40, r: 8, t: 22, b: 22}, lo = -3, hi = 1;
+  const x = i => pad.l + i / (N - 1) * (w - pad.l - pad.r), y = v => pad.t + (hi - v) / (hi - lo) * (h - pad.t - pad.b);
+  axes(g, w, h, lo, hi, pad, '');
+  const aft = afterSeries();
+  line(g, exportB, x, y, css('--measured'), 1.1);
+  line(g, aft, x, y, css('--curve'), 2.4);
+  // current frame
+  g.strokeStyle = css('--dim'); g.lineWidth = 1; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(x(state.cur), pad.t - 4); g.lineTo(x(state.cur), h - pad.b); g.stroke(); g.setLineDash([]);
+  // flags and edges
+  const flags = flagsOf(aft).filter(i => !state.fine.has(i));
+  g.font = '13px Inter, system-ui';
+  flags.forEach(i => { const cx = x(i), cy = pad.t - 11; g.fillStyle = css('--text'); g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + 6, cy); g.lineTo(cx, cy + 6); g.lineTo(cx - 6, cy); g.closePath(); g.fill(); });
+  g.fillStyle = css('--dim'); [0, 1, N - 2, N - 1].forEach((i, k) => k % 2 === 0 && g.fillText('?', x(i) + (i > 2 ? -6 : 0), pad.t - 6));
+  g.fillText('frame 1', pad.l, h - 6); g.fillText('229', w - pad.r - 22, h - 6);
+  state.flags = flags;
+  document.getElementById('flagCount').textContent = flags.length ? `${flags.length} frame${flags.length > 1 ? 's' : ''} worth a look` : 'Nothing left to look at';
+  drawFrames();
+}
+document.getElementById('cRev').addEventListener('click', e => {
+  const c = e.currentTarget, r = c.getBoundingClientRect(), pad = 40;
+  state.cur = Math.max(0, Math.min(N - 1, Math.round((e.clientX - r.left - pad) / (r.width - pad - 8) * (N - 1))));
+  drawReview();
+});
+
+// ---------------- the frames: a drawn dusk scene ----------------
+function frameLight(i, after) { return after ? afterSeries()[i] : exportB[i]; }
+function frameWarm(i, after) { return after ? smooth(exportW, 40)[i] : exportW[i]; }
+function drawScene(c, i, after) {
+  const [g, w, h] = prepCanvas(c);
+  const k = Math.pow(2, frameLight(i, after) * 0.55), warm = frameWarm(i, after), dusk = t(i);
+  const tint = (r, gg, b) => `rgb(${Math.min(255, r * k * (1 + warm * 0.5))|0},${Math.min(255, gg * k)|0},${Math.min(255, b * k * (1 - warm * 0.5))|0})`;
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.6);
+  sky.addColorStop(0, tint(120 - 90 * dusk, 160 - 120 * dusk, 220 - 130 * dusk));
+  sky.addColorStop(1, tint(230 - 120 * dusk, 190 - 120 * dusk, 160 - 60 * dusk));
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  // buildings
+  const bld = [[0.05, .32, .18], [0.25, .22, .14], [0.42, .40, .22], [0.68, .28, .16], [0.86, .36, .14]];
+  bld.forEach(([bx, top, bw], n) => {
+    g.fillStyle = tint(70 - 40 * dusk, 72 - 42 * dusk, 80 - 40 * dusk);
+    g.fillRect(bx * w, top * h, bw * w, h * 0.62 - top * h);
+    for (let r = 0; r < 6; r++) for (let q = 0; q < 4; q++) {      // windows light up as night falls
+      const lit = ((n * 31 + r * 7 + q * 13) % 10) / 10 < dusk * 1.2 - 0.25;
+      g.fillStyle = lit ? `rgb(${255*Math.min(1,k)|0},${210*Math.min(1,k)|0},${120*Math.min(1,k)|0})` : tint(55 - 30 * dusk, 58 - 30 * dusk, 66 - 30 * dusk);
+      g.fillRect(bx * w + (q + 0.3) * bw * w / 4.2, top * h + (r + 0.4) * (h * 0.6 - top * h) / 6.6, bw * w / 9, h / 40);
+    }
+  });
+  // ground and path
+  g.fillStyle = tint(60 - 35 * dusk, 80 - 45 * dusk, 55 - 30 * dusk); g.fillRect(0, h * 0.62, w, h * 0.38);
+  g.fillStyle = tint(120 - 70 * dusk, 118 - 70 * dusk, 112 - 65 * dusk);
+  g.beginPath(); g.moveTo(w * 0.42, h * 0.62); g.lineTo(w * 0.58, h * 0.62); g.lineTo(w * 0.85, h); g.lineTo(w * 0.15, h); g.fill();
+  // walkers (different every frame)
+  let s2 = i * 97 + 3; const r2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
+  const count = walkers[i] !== undefined ? 6 : 2;
+  for (let n = 0; n < count; n++) {
+    const px = w * (0.3 + 0.4 * r2()), py = h * (0.7 + 0.25 * r2()), sz = h * (0.05 + 0.06 * (py / h - 0.6));
+    g.fillStyle = 'rgba(20,20,24,.55)'; g.fillRect(px, py - sz * 2, sz * 0.7, sz * 2); g.beginPath(); g.arc(px + sz * 0.35, py - sz * 2.3, sz * 0.4, 0, 7); g.fill();
+  }
+}
+function drawFrames() {
+  const i = state.cur, a = state.blink ? state.blinkAfter : state.after;
+  if (i > 0) drawScene(document.getElementById('fPrev'), i - 1, a); else prepCanvas(document.getElementById('fPrev'));
+  drawScene(document.getElementById('fCur'), i, a);
+  if (i < N - 1) drawScene(document.getElementById('fNext'), i + 1, a); else prepCanvas(document.getElementById('fNext'));
+  const name = n => '181A' + (1579 + n);
+  document.getElementById('capPrev').textContent = i > 0 ? name(i - 1) : '';
+  document.getElementById('capCur').textContent = `${name(i)} (frame ${i + 1})`;
+  document.getElementById('capNext').textContent = i < N - 1 ? name(i + 1) : '';
+  document.getElementById('capState').textContent = a ? 'After' : 'Before';
+  const aft = afterSeries(), d = aft[i] - ((aft[Math.max(0, i - 1)] + aft[Math.min(N - 1, i + 1)]) / 2);
+  const edge = i < 2 || i > N - 3;
+  document.getElementById('frameNote').textContent = edge ? "Can't judge: too close to the end of the sequence"
+    : Math.abs(d) < 0.01 ? 'In step with its neighbours'
+    : `${Math.abs(d).toFixed(2)} stops ${d < 0 ? 'darker' : 'brighter'} than its neighbours`;
+  document.getElementById('fineBtn').disabled = !(state.flags || []).includes(i);
+}
+function setAfter(v) { stopMotion(); state.after = v; document.getElementById('bAfter').classList.toggle('on', v); document.getElementById('bBefore').classList.toggle('on', !v); drawFrames(); }
+function toggleBlink() {
+  if (state.blink) { clearInterval(state.blink); state.blink = null; document.getElementById('bBlink').classList.remove('on'); drawFrames(); return; }
+  stopPlay(); state.blinkAfter = state.after;
+  document.getElementById('bBlink').classList.add('on');
+  state.blink = setInterval(() => { state.blinkAfter = !state.blinkAfter; drawFrames(); }, 450);
+}
+function togglePlay() {
+  if (state.play) return stopPlay();
+  if (state.blink) toggleBlink();
+  document.getElementById('bPlay').classList.add('on'); document.getElementById('bPlay').textContent = 'Pause';
+  state.play = setInterval(() => { state.cur = (state.cur + 1) % N; drawReview(); }, 1000 / 24);
+}
+function stopPlay() { if (state.play) { clearInterval(state.play); state.play = null; } const b = document.getElementById('bPlay'); b.classList.remove('on'); b.textContent = 'Play'; }
+function stopMotion() { stopPlay(); if (state.blink) toggleBlink(); }
+function nextFlag() {
+  const f = state.flags || []; if (!f.length) return toast('Nothing left to look at');
+  state.cur = f.find(i => i > state.cur) ?? f[0]; drawReview();
+}
+function looksFine() { state.fine.add(state.cur); toast(`Frame ${state.cur + 1} marked as fine`); drawReview(); }
+
+// ---------------- waiting for the export ----------------
+function startWatch() {
+  stopWatch();
+  const box = document.getElementById('watch');
+  let found = 0, quiet = 0;
+  const show = () => {
+    if (found === 0) {
+      box.innerHTML = `<p><span class="pulse"></span>Watching for a new export</p>
+        <p class="dim path">F:\\Photography\\…\\salman shoot</p>
+        <div class="row"><button class="btn" onclick="toast('Choose the export folder yourself')">Choose folder instead</button></div>`;
+    } else if (found < N) {
+      box.innerHTML = `<p><span class="pulse"></span>Export arriving: ${found} of ${N} frames</p>
+        <p class="dim path">F:\\…\\salman shoot\\final-export</p>
+        <div class="progress"><div style="width:${found / N * 100}%"></div></div>`;
+    } else {
+      box.innerHTML = `<div class="found">Found ${N} exported frames.</div>
+        <p class="dim path">F:\\…\\salman shoot\\final-export</p>
+        <p class="dim">All ${N} frames are there and nothing has changed for a few seconds, so the export looks complete.</p>
+        <div class="row"><button class="btn primary" onclick="go('finish')">Finish now</button>
+        <button class="btn" onclick="toast('Keeps watching for a different folder')">Not this folder</button></div>`;
+    }
+  };
+  show();
+  state.watch = setInterval(() => {
+    if (++quiet < 10 && found === 0) return;            // pretend you're grading for a moment
+    if (found < N) { found = Math.min(N, found + 9); show(); }
+    else { stopWatch(); state.done.add('grade'); renderStages(); }
+  }, 150);
+}
+function stopWatch() { if (state.watch) { clearInterval(state.watch); state.watch = null; } }
+
+// ---------------- smoothness and jobs ----------------
+function smoothChanged(which) {
+  const v = +document.getElementById('smooth' + which).value;
+  if (which === 'P') { state.smoothP = v; drawPrepare(); }
+  else { state.smoothR = v; document.getElementById('reapply').disabled = v === state.appliedR; drawReview(); }
+}
+function runJob(kind) {
+  const isPrep = kind === 'prep', box = document.getElementById(isPrep ? 'prepProgress' : 'finProgress');
+  const bar = document.getElementById(isPrep ? 'prepBar' : 'finBar'), status = document.getElementById(isPrep ? 'prepStatus' : 'finStatus');
+  const actions = document.getElementById(isPrep ? 'prepActions' : 'finActions');
+  const saved = actions.innerHTML;
+  box.style.display = 'block';
+  actions.innerHTML = '<button class="btn" id="cancelBtn">Cancel</button>';
+  const stages = isPrep ? [['Measuring', N], ['Writing', N]] : [['Measuring', N], ['Writing frames and video', N], ['Checking', N]];
+  let si = 0, done = 0, stopped = false;
+  document.getElementById('cancelBtn').onclick = () => { stopped = true; };
+  const total = stages.reduce((a, s) => a + s[1], 0); let all = 0;
+  const timer = setInterval(() => {
+    if (stopped) {
+      clearInterval(timer);
+      status.textContent = `Stopped after ${done} of ${N} frames. Everything is consistent; run it again to carry on, or undo.`;
+      actions.innerHTML = saved; return;
+    }
+    done += 4; all += 4;
+    if (done >= stages[si][1]) { done = 0; si++; }
+    bar.style.width = Math.min(100, all / total * 100) + '%';
+    if (si >= stages.length) {
+      clearInterval(timer);
+      if (isPrep) { status.textContent = 'Corrections applied to 229 frames.'; state.done.add('prepare'); actions.innerHTML = saved; setTimeout(() => go('grade'), 700); }
+      else { status.textContent = 'Finished. Brightness wobble 0.041 → 0.013 stops; colour 0.028 → 0.010.'; state.done.add('grade'); state.done.add('finish');
+        actions.innerHTML = '<button class="btn" onclick="toast(\'Opens the folder with the video selected\')">Show in folder</button><button class="btn primary" onclick="go(\'review\')">Review</button>'; }
+      renderStages(); return;
+    }
+    const left = Math.ceil((total - all) / 4 / 12);
+    status.textContent = `${stages[si][0]} ${Math.min(done + 1, N)} of ${N}. About ${left} s left.`;
+  }, 1000 / 12);
+}
+function runReapply() {
+  stopMotion();
+  const b = document.getElementById('reapply'); b.disabled = true; b.textContent = 'Applying…';
+  setTimeout(() => { state.appliedR = state.smoothR; b.textContent = 'Apply changes'; toast('Changes applied: frames and video rewritten'); }, 1400);
+}
+
+// ---------------- odds and ends ----------------
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200); }
+document.addEventListener('keydown', e => {
+  if (state.stage !== 'review' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') { state.cur = Math.min(N - 1, state.cur + 1); drawReview(); }
+  else if (e.key === 'ArrowLeft') { state.cur = Math.max(0, state.cur - 1); drawReview(); }
+  else if (e.key === 'f' || e.key === 'F') nextFlag();
+  else if (e.key === 'b' || e.key === 'B') toggleBlink();
+  else if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+});
+addEventListener('resize', () => { if (state.stage === 'prepare') drawPrepare(); if (state.stage === 'review') drawReview(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => go(state.stage));
+const dz = document.getElementById('drop');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = 'var(--text)'; });
+dz.addEventListener('dragleave', () => dz.style.borderColor = '');
+dz.addEventListener('drop', e => { e.preventDefault(); dz.style.borderColor = ''; openProject(); });
+go('start');
+</script>
+</body>
+</html>
