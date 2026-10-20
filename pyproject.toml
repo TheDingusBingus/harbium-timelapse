@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "harbium-timelapse"
 version = "0.2.0"
-description = "Free timelapse deflicker and steady white balance, measured not guessed. An LRTimelapse alternative that works after any editor."
+description = "A free, open-source timelapse tool: deflicker and smooth white balance, made to work alongside your photo editor."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "James Harbour" }]

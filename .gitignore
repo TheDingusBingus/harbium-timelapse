@@ -6,3 +6,9 @@ dist/
 build/
 .venv/
 .DS_Store
+
+# videos and exports never belong in the repo
+*.mp4
+*.mov
+*.m4v
+*.avi
