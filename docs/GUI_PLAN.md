@@ -57,6 +57,7 @@ Constraints that shape the plan:
 - **One developer, plus me.** The design has to stay small enough to maintain. Fewer moving parts beats cleverness.
 - **Windows first.** Windows is the supported platform. Mac and Linux builds are published as experimental until people in the community test them, so nothing in the design may rule them out.
 - **Offline.** Photographers work on laptops in the field and on locked-down machines. The app must do everything without an internet connection.
+- **Users already run a RAW editor.** Almost nobody makes a timelapse without one, so the editor's own hardware needs set a realistic floor: a machine that runs Lightroom Classic or RapidRAW comfortably should run this app comfortably. The app must never be the thing that makes a machine fall short.
 - **Big data on slow drives.** A typical sequence is 200 to 2,000 RAW files of 20 to 60 MB each, often on an external drive. Reading them is the slowest part of everything.
 - **The library stays the source of truth.** The command line keeps working and keeps full feature parity; anything the app can do, a script can do.
 - **The editor stays in charge of the look.** The app never tries to replace the photographer's editor; it hands over and takes back.
@@ -246,12 +247,20 @@ Numbered so tests and issues can refer to them. "The app" means the GUI; anythin
 | FR-21 | A diagnostics file can be saved with versions, settings, the run report and the log, and with paths shortened to folder names and no image data. | US-18 |
 | FR-22 | Editor plug-ins installed in the same Python environment appear in the app automatically. | US-19 |
 | FR-23 | The about screen lists versions and the licences of everything bundled. | |
+| FR-24 | The app chooses preview size, playback frame rate and the number of workers to suit the machine (QR-17), shows what it chose in settings, and lets the user change it. | |
 
 ---
 
 ## 7. Quality requirements
 
-Each has a number so it can be tested. Times are for a typical laptop (8 cores, SSD for the app, external USB 3 drive for photos) and a 229-frame Canon R6 sequence unless stated.
+Each has a number so it can be tested, against two reference machines and a 229-frame Canon R6 sequence unless stated.
+
+| Reference machine | What it is | Why |
+|---|---|---|
+| **Typical** | 8-core laptop or desktop, 16 GB of memory, SSD for the app, photos on an external USB 3 drive | What most of our users will have |
+| **Minimum** | 4-core processor from about 2017 onwards, 8 GB of memory, integrated graphics with DirectX 12, 1080p screen, Windows 10 22H2, photos on an external USB hard drive (spinning) | At or below Lightroom Classic's own minimum (Windows 10 22H2 or 11, 8 GB of memory, a DirectX 12 GPU with 2 GB). If someone's machine runs their editor, it runs this. |
+
+The targets below are for the typical machine; QR-16 sets the targets for the minimum machine.
 
 | ID | Quality | Target |
 |---|---|---|
@@ -270,6 +279,8 @@ Each has a number so it can be tested. Times are for a typical laptop (8 cores, 
 | QR-13 | Install size | Installer under 400 MB. |
 | QR-14 | Maintainability | No image maths in the GUI code; the GUI layer is under a quarter of the codebase; app services and view logic are testable without starting a window. |
 | QR-15 | Portability | Nothing in the app services or view logic is Windows-specific; platform differences live in one module. |
+| QR-16 | Minimum machine | Everything works, nothing freezes, and: the window appears in under 6 seconds; a cached project opens in under 4 seconds; re-planning redraws in under 300 ms; the frame viewer shows each frame within 250 ms; preview playback is smooth at 24 frames a second with smaller previews (640 px), or at a lower frame rate with a note saying so; memory stays under 1 GB for 2,000 frames. Measuring and finishing may take longer; they're limited by the processor and the drive, exactly as in the user's editor. |
+| QR-17 | Adapting to the machine | The app adapts by itself (preview size, playback frame rate, number of workers) based on the machine's cores and memory and on timing its first few previews, so nobody has to find a setting. Each choice can be overridden in settings. |
 
 ---
 
@@ -825,6 +836,7 @@ This is the plan as I understand the licences, not legal advice; a short check w
 
 Without code signing, Windows SmartScreen shows "Windows protected your PC" when someone runs the installer, until the app builds a download reputation. To keep that from losing people:
 
+- The download page states the requirements plainly: Windows 10 (22H2) or 11, 8 GB of memory or more, DirectX 12 graphics; "if your computer runs your RAW editor, it runs this".
 - The download page and README show the warning with a screenshot and the two clicks past it ("More info", then "Run anyway"), and say why it appears.
 - Every release publishes SHA-256 checksums of the installer, so careful users can verify it.
 - Releases are built only in GitHub's build service from a tagged commit, with GitHub's build provenance (artifact attestations) attached, so anyone can check where an installer came from.
@@ -901,6 +913,19 @@ The budgets are in section 7. These are the techniques that meet them, most impo
 6. **Keep the computer awake during long jobs** (Windows `SetThreadExecutionState`, macOS power assertions) and release it straight after, so an overnight finish doesn't stop at the screensaver.
 7. **Check space before writing.** Estimate output size (frames x average size, plus the video) and refuse with a clear message if the drive would fill, instead of failing halfway.
 8. **Cache housekeeping.** Caches have a size limit (default 5 GB, adjustable) and are cleared oldest first; a "Clear caches" button exists in settings.
+
+### Adapting to slower machines
+
+The heaviest work, decoding RAW files and measuring them, happens in the library and costs the same with or without the app; the app's own screens are light by comparison. On a slower machine, four things adapt:
+
+1. **Preview size.** Previews are made at 960 px on a typical machine. On the first open, the app times the first few previews; if they're slow, or memory is 8 GB or less, it switches to 640 px, which roughly halves the cost of making, storing and showing them.
+2. **Playback.** If a preview frame can't be shown in time, playback drops that frame rather than stuttering, and if it keeps happening, it switches to a lower frame rate and says so on screen. The timeline and the frame viewer never depend on playback.
+3. **Workers.** The number of worker processes already follows the number of cores (one fewer than the cores, up to eight). On machines with 8 GB of memory or less, it's also capped by memory, so a job never pushes the system into swapping.
+4. **What runs at once.** On the minimum machine, preview images are made only after measuring finishes rather than alongside it, so the two don't compete for one slow drive.
+
+What doesn't change: results. A slower machine gets exactly the same corrections, measurements and video, only later. Adapting only ever changes how things are shown, never what's measured or written.
+
+The command line stays the lightest option of all, for anyone on hardware too old for the app.
 
 ### Reading from slow drives
 
@@ -988,7 +1013,9 @@ Done when: all tests pass, `finish` writes a report, and your dusk sequence's re
 | S7 | Encode the dusk sequence with x264 (GPL build) and with Windows' own encoder (LGPL build) at matched file sizes; compare by eye and by measured quality | Decides which ffmpeg build to bundle |
 | S8 | Run `benchmarks/reading_speed.py` on real drives: James's external drive, an internal SSD, a USB SSD | Decides whether parallel ExifTool is the default, and for which drives |
 
-**Decision gate:** go with Flet if S1 and S2 pass (S2 with either workers or threads) and S3 and S4 meet their budgets. Otherwise, the same experiments with PySide6, then decide. S7 and S8 don't affect the framework choice; they set defaults.
+S2 to S5 run on both reference machines (section 7). For the minimum machine, an older laptop that matches it is best. Failing that, a virtual machine limited to 4 cores and 8 GB with the photos on a USB hard drive gives a harsh worst case, because virtual machines usually have no real graphics acceleration: if it's acceptable there, it's acceptable on real minimum hardware.
+
+**Decision gate:** go with Flet if S1 and S2 pass (S2 with either workers or threads) and S3 and S4 meet their budgets. Otherwise, the same experiments with PySide6, then decide. S3 to S5 must meet the minimum-machine targets (QR-16) too, with adapting switched on. S7 and S8 don't affect the framework choice; they set defaults.
 
 ### Phase 2: the first working app
 
