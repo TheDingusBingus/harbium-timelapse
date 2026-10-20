@@ -29,6 +29,7 @@ Writes corrected frames, a video (needs ffmpeg), or both.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +40,7 @@ from PIL import Image
 
 from .deflicker import DEFAULT_WINDOW, check_window, smooth_brightness
 from .measure import (
-    CLIPPED, LONG_EDGE, _PERCENTS, SteadyChain, _srgb_to_linear, brightness_from_profiles,
+    CLIPPED, LONG_EDGE, SteadyChain, _srgb_to_linear, brightness_from_profiles,
     tone_profile,
 )
 from .parallel import ordered_map
@@ -108,23 +109,53 @@ class FinishPlan:
         return float(np.max(np.abs(self.gains[:, 0] - self.gains[:, 2]))) if len(self.frames) else 0.0
 
 
-def measure_channels(frames: list[Path], progress: Progress | None = None, steady: bool = True) -> np.ndarray:
+class Meter:
+    """Measures frames one at a time, as they arrive (from disk or straight
+    from memory while they're being written), so the same measurement serves
+    the plan and the self-check without reading every file again."""
+
+    def __init__(self, motion: bool = False):
+        self.profiles: list[list[np.ndarray]] = [[], [], []]
+        self.chains = [SteadyChain(), SteadyChain(), SteadyChain()]
+        self.shifts: list[tuple[float, float]] | None = [] if motion else None
+        self.width = 0
+        self._previous = None
+
+    def add(self, small: np.ndarray) -> None:
+        blown = small.max(axis=-1) >= CLIPPED
+        for c in range(3):
+            self.profiles[c].append(tone_profile(small[..., c]))
+            self.chains[c].add(np.where(blown, 1.0, small[..., c]))
+        if self.shifts is not None:
+            luma = small @ LUMA
+            if self._previous is not None and luma.shape == self._previous.shape:
+                from .review import shift
+                self.shifts.append(shift(self._previous, luma))
+            self._previous, self.width = luma, luma.shape[1]
+
+    def series(self, steady: bool = True) -> np.ndarray:
+        band = [brightness_from_profiles(np.array(self.profiles[c])) for c in range(3)]
+        return np.column_stack([self.chains[c].series(band[c]) if steady else band[c] for c in range(3)])
+
+    def motion(self) -> float:
+        from .review import camera_motion
+        return camera_motion(self.shifts or [], self.width)
+
+
+def measure_channels(frames: list[Path], progress: Progress | None = None, steady: bool = True,
+                     meter: Meter | None = None) -> np.ndarray:
     """Brightness of each colour channel of each frame (frames × 3, stops).
 
     Like deflicker's measurement: the change of the still part of the scene
     since the previous frame, so walkers and cars can't sway it; the
-    whole-frame tone measure fills in where two frames can't be compared."""
-    profiles = np.empty((3, len(frames), _PERCENTS.size))
-    chains = [SteadyChain(), SteadyChain(), SteadyChain()]
+    whole-frame tone measure fills in where two frames can't be compared.
+    Pass a ``Meter(motion=True)`` to also learn whether the camera moved."""
+    meter = meter or Meter()
     for i, small in enumerate(ordered_map(_small_linear_of, frames)):
-        blown = small.max(axis=-1) >= CLIPPED
-        for c in range(3):
-            profiles[c, i] = tone_profile(small[..., c])
-            chains[c].add(np.where(blown, 1.0, small[..., c]))
+        meter.add(small)
         if progress:
             progress(i + 1, len(frames))
-    band = [brightness_from_profiles(profiles[c]) for c in range(3)]
-    return np.column_stack([chains[c].series(band[c]) if steady else band[c] for c in range(3)])
+    return meter.series(steady)
 
 
 def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool = True,
@@ -192,7 +223,7 @@ def _ffmpeg_encoders() -> set[str]:
 def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | str | None = None,
                  fps: float = 24, width: int | None = None, quality: int | None = None,
                  progress: Progress | None = None, fmt: str | None = None,
-                 codec: str = "h264", dither: bool = True) -> list[Path]:
+                 codec: str = "h264", dither: bool = True, meter: "Meter | None" = None) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -232,6 +263,11 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
     if out is not None:
         out.mkdir(parents=True, exist_ok=True)
     encoder = None
+    partial = None
+    if video is not None:
+        video = Path(video)
+        partial = video.with_name(video.stem + ".partial" + video.suffix)
+    finished = False
     try:
         ten_bit = video is not None and CODECS[codec][3]
         for i, (path, gains) in enumerate(zip(plan.frames, plan.gains, strict=True)):
@@ -249,13 +285,26 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 else:
                     frame = correct(img, gains, out_dtype=np.uint8, dither=dither, seed=i)
                 if encoder is None:
-                    encoder = _Encoder(Path(video), frame, fps, width, quality, codec)
+                    encoder = _Encoder(partial, frame, fps, width, quality, codec)
                 encoder.write(frame)
+            if meter is not None:
+                meter.add(_small_linear(fixed if fixed is not None else frame))
             if progress:
                 progress(i + 1, len(plan.frames))
+        finished = True
     finally:
         if encoder is not None:
-            encoder.close()
+            try:
+                encoder.close()
+            except RuntimeError:
+                finished = False
+                raise
+            finally:
+                if partial is not None and partial.exists():
+                    if finished:
+                        os.replace(partial, video)
+                    else:
+                        partial.unlink(missing_ok=True)
     return targets
 
 

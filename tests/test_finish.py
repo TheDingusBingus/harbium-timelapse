@@ -108,7 +108,9 @@ def test_cli_dry_run_and_real_run(tmp_path, capsys):
     assert cli.main(["finish", str(tmp_path / "e")]) == 1                # no destination given
     assert cli.main(["finish", str(tmp_path / "e"), "--out", str(tmp_path / "out")]) == 0
     out = capsys.readouterr().out
-    assert "Measured on the corrected frames" in out and len(list((tmp_path / "out").iterdir())) == N
+    assert "Measured on the corrected frames" in out
+    assert len([f for f in (tmp_path / "out").iterdir() if f.suffix == ".png"]) == N
+    assert (tmp_path / "out" / "timelapse-report.json").exists()            # the run report sits with the output
 
 
 # --- dark sequences: 16-bit in, small files out ----------------------------------
