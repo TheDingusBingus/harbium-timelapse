@@ -11,19 +11,23 @@ finished film, use your editor.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Callable
 
+from .programs import find_program
 from .sequencer import _natural_key
 
 RENDERABLE = {".jpg": "mjpeg", ".jpeg": "mjpeg", ".png": "png", ".tif": "tiff", ".tiff": "tiff"}
 
 
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return find_program("ffmpeg") is not None
+
+
+def ffmpeg() -> str:
+    return find_program("ffmpeg") or "ffmpeg"
 
 
 def render_video(
@@ -97,7 +101,7 @@ def render_video(
 
 def _encode(frames, kind, fps, scale, target, progress, codec_args) -> None:
     command = [
-        "ffmpeg", "-y", "-loglevel", "error",
+        ffmpeg(), "-y", "-loglevel", "error",
         "-f", "image2pipe", "-framerate", str(fps), "-c:v", kind, "-i", "-",
         "-vf", f"{scale},format=yuv420p", *codec_args, target,
     ]

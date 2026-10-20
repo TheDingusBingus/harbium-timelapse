@@ -85,3 +85,12 @@ def test_ledger_written_atomically(tmp_path):
     apply(plan(load(tmp_path), raw_brightness=RAW[:10]))
     assert json.loads((tmp_path / ".timelapse-core" / "rapidraw.json").read_text())["frames"]
     assert not list((tmp_path / ".timelapse-core").glob("*.tmp"))
+
+
+def test_mixed_raw_and_jpeg_is_refused_unless_forced(tmp_path, capsys):
+    images = make_sequence(tmp_path, 10)
+    (tmp_path / "181A1003.JPG").write_bytes(b"\xff\xd8\xff")          # a RAW+JPEG pair in the folder
+    before = exposures(images)
+    assert cli.main(["deflicker", str(tmp_path)]) == 1
+    assert "Not changing anything" in capsys.readouterr().err
+    assert exposures(images) == before

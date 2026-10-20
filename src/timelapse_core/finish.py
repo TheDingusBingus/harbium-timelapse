@@ -42,7 +42,7 @@ from .measure import (
     CLIPPED, LONG_EDGE, _PERCENTS, SteadyChain, _srgb_to_linear, brightness_from_profiles,
     tone_profile,
 )
-from .render import RENDERABLE, ffmpeg_available
+from .render import RENDERABLE, ffmpeg, ffmpeg_available
 from .sequencer import _natural_key
 
 Progress = Callable[[int, int], None]
@@ -149,7 +149,7 @@ def plan_finish(frames: list[Path], window: int = DEFAULT_WINDOW, colour: bool =
 
 def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | str | None = None,
                  fps: float = 24, width: int | None = None, quality: int = 16,
-                 progress: Progress | None = None, fmt: str | None = None) -> None:
+                 progress: Progress | None = None, fmt: str | None = None) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -162,19 +162,39 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
         raise ValueError('The output format must be "jpg", "png" or "tif".')
     if out is None and video is None:
         raise ValueError("Say where to put the result: a folder for frames, a video file, or both.")
+    if fps <= 0:
+        raise ValueError(f"Frames per second must be above 0 (got {fps}).")
+    if width is not None and width < 16:
+        raise ValueError(f"The video width must be at least 16 pixels (got {width}).")
+    targets: list[Path] = []
     if out is not None:
         out = Path(out)
+        if out.exists() and not out.is_dir():
+            raise ValueError(f"{out} is a file, not a folder. Give a folder for the corrected frames.")
         if out.resolve() == plan.frames[0].parent.resolve():
             raise ValueError("Write the corrected frames to a different folder: your export stays untouched.")
+        suffix = None if fmt is None else "." + fmt.lower().lstrip(".")
+        targets = [out / p.name if suffix is None else (out / p.name).with_suffix(suffix) for p in plan.frames]
+        if out.is_dir():
+            # Re-running into the same folder is fine (same names are replaced); other
+            # frames there would end up mixed with these ones.
+            wanted = {t.name.lower() for t in targets}
+            others = [p.name for p in finished_frames_or_none(out) if p.name.lower() not in wanted]
+            if others:
+                raise ValueError(f"{out} already holds other frames (e.g. {others[0]}). Use an empty "
+                                 "folder, so these frames don't get mixed with them.")
+    if video is not None:
+        _same_size_or_raise(plan.frames)          # checked before a single frame is written
+        Path(video).parent.mkdir(parents=True, exist_ok=True)
+    if out is not None:
         out.mkdir(parents=True, exist_ok=True)
     encoder = None
     try:
-        for i, (path, gains) in enumerate(zip(plan.frames, plan.gains)):
+        for i, (path, gains) in enumerate(zip(plan.frames, plan.gains, strict=True)):
             img, info = _read(path, with_info=True)
             fixed = correct(img, gains)
             if out is not None:
-                target = out / path.name if fmt is None else (out / path.name).with_suffix("." + fmt.lower().lstrip("."))
-                _write(target, fixed, info)
+                _write(targets[i], fixed, info)
             if video is not None:
                 if encoder is None:
                     encoder = _Encoder(Path(video), fixed, fps, width, quality)
@@ -184,6 +204,35 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
     finally:
         if encoder is not None:
             encoder.close()
+    return targets
+
+
+def finished_frames_or_none(folder: Path) -> list[Path]:
+    try:
+        return finished_frames(folder)
+    except ValueError:                             # fewer than 3: still worth listing
+        return [p for p in Path(folder).iterdir()
+                if p.is_file() and p.suffix.lower() in RENDERABLE and not p.name.startswith(".")]
+
+
+def _frame_size(path: Path) -> tuple[int, int]:
+    if path.suffix.lower() in (".tif", ".tiff"):
+        try:
+            import tifffile
+            with tifffile.TiffFile(str(path)) as t:
+                return tuple(t.pages[0].shape[:2])[::-1]
+        except ImportError:
+            pass
+    with Image.open(path) as im:                    # reads the header only
+        return im.size
+
+
+def _same_size_or_raise(frames) -> None:
+    first = _frame_size(frames[0])
+    for p in frames[1:]:
+        if _frame_size(p) != first:
+            raise ValueError(f"Every frame must be the same size to make a video: {frames[0].name} is "
+                             f"{first[0]}x{first[1]}, {p.name} is {'x'.join(map(str, _frame_size(p)))}.")
 
 
 def correct(img: np.ndarray, gains_stops) -> np.ndarray:
@@ -266,10 +315,10 @@ class _Encoder:
                                "(then open a new terminal). Elsewhere: ffmpeg.org.")
         self.shape, self.dtype = first.shape, first.dtype
         h, w = first.shape[:2]
-        scale = f"scale={width}:-2" if width else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        scale = f"scale={width // 2 * 2}:-2" if width else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
         pix = "rgb48le" if first.dtype == np.uint16 else "rgb24"
         self.process = subprocess.Popen(
-            ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
+            [ffmpeg(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
              "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-",
              "-vf", f"{scale},format=yuv420p", "-c:v", "libx264", "-preset", "slow",
              "-crf", str(quality), "-movflags", "+faststart", str(target)],

@@ -17,13 +17,13 @@ import dataclasses
 import json
 import logging
 import os
-import shutil
 import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from .programs import find_program
 from .types import Frame
 
 Progress = Callable[[int, int], None]
@@ -36,7 +36,7 @@ _EXIFTOOL_TAGS = [
 
 
 def exiftool_available() -> bool:
-    return shutil.which("exiftool") is not None
+    return find_program("exiftool") is not None
 
 
 def read_frames(paths: list[Path], progress: Progress | None = None) -> list[Frame]:
@@ -68,7 +68,8 @@ def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[st
     """
     frames: dict[str, Frame] = {}
     for start in range(0, len(paths), BATCH):
-        batch = paths[start:start + BATCH]
+        # Absolute paths: a file name starting with "-" can't then be read as an option.
+        batch = [p.resolve() for p in paths[start:start + BATCH]]
         for rec in _exiftool_batch(batch):
             source = rec.get("SourceFile")
             if not source:
@@ -87,7 +88,7 @@ def _read_with_exiftool(paths: list[Path], progress: Progress | None) -> dict[st
         if progress:
             progress(min(start + BATCH, len(paths)), len(paths))
     # Keep the caller's own Path objects, not ExifTool's spelling of them.
-    by_key = {_key(p): p for p in paths}
+    by_key = {_key(p.resolve()): p for p in paths}
     return {k: dataclasses.replace(f, path=by_key[k]) for k, f in frames.items() if k in by_key}
 
 
@@ -98,13 +99,20 @@ def _exiftool_batch(batch: list[Path]) -> list[dict]:
             f.write("\n".join(["-charset", "filename=utf8", *map(str, batch)]))
             argfile = f.name
         out = subprocess.run(
-            ["exiftool", "-json", "-n", *_EXIFTOOL_TAGS, "-@", argfile],
+            [find_program("exiftool") or "exiftool", "-json", "-n", *_EXIFTOOL_TAGS, "-@", argfile],
             capture_output=True, encoding="utf-8", errors="replace",
             stdin=subprocess.DEVNULL,  # never let ExifTool sit waiting for a keypress
             timeout=BATCH_TIMEOUT, check=False,
         )
+        if out.returncode not in (0, 1) and not out.stdout.strip():   # 1 = some files had no tags
+            _note_problem(f"ExifTool stopped with an error: {out.stderr.strip()[:200] or out.returncode}")
         return json.loads(out.stdout or "[]")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+    except subprocess.TimeoutExpired:
+        _note_problem(f"ExifTool took over {BATCH_TIMEOUT} s on {len(batch)} files (a slow or sleeping "
+                      "drive?) and was stopped")
+        return []
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as e:
+        _note_problem(f"ExifTool couldn't be run ({e})")
         return []
     finally:
         if argfile:
@@ -114,6 +122,14 @@ def _exiftool_batch(batch: list[Path]) -> list[dict]:
 def _key(path: Path | str) -> str:
     """Same file, same key, whichever way the slashes face or letters are cased."""
     return os.path.normcase(os.path.abspath(str(path)))
+
+
+PROBLEMS: list[str] = []   # why ExifTool failed, if it did: shown by check, not swallowed
+
+
+def _note_problem(text: str) -> None:
+    if text not in PROBLEMS:
+        PROBLEMS.append(text)
 
 
 # --- exifread ---------------------------------------------------------------

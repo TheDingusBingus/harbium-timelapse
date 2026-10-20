@@ -69,3 +69,50 @@ def test_all_black_sequence_says_so(tmp_path, capsys):
         Image.fromarray(np.zeros((20, 20, 3), np.uint8)).save(folder / f"f{i}.png")
     assert cli.main(["finish", str(folder), "--dry-run"]) == 1
     assert "all black" in capsys.readouterr().err
+
+
+# --- stage 2: odd inputs and security -----------------------------------------
+
+import shutil  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+def test_output_folder_with_other_frames_is_refused(tmp_path):
+    fs = frames(tmp_path / "e")
+    apply_finish(plan_finish(fs), out=tmp_path / "out")
+    apply_finish(plan_finish(fs), out=tmp_path / "out")                 # same names again: fine
+    with pytest.raises(ValueError, match="other frames"):
+        apply_finish(plan_finish(fs), out=tmp_path / "out", fmt="jpg")  # would mix PNG and JPG
+
+
+def test_mixed_sizes_refused_before_anything_is_written(tmp_path):
+    fs = frames(tmp_path / "e")
+    Image.open(fs[5]).crop((0, 0, 80, 60)).save(fs[5])
+    with pytest.raises(ValueError, match="same size"):
+        apply_finish(plan_finish(fs), out=tmp_path / "out", video=tmp_path / "v.mp4")
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").iterdir())
+
+
+@pytest.mark.skipif(shutil.which("exiftool") is None, reason="needs ExifTool")
+def test_file_named_like_an_option_is_read_as_a_file(tmp_path, monkeypatch):
+    from timelapse_core.exif import _read_with_exiftool
+    fs = frames(tmp_path / "e")
+    odd = fs[0].parent / "-delete_original!.png"
+    fs[0].rename(odd)
+    monkeypatch.chdir(odd.parent)
+    from pathlib import Path
+    found = _read_with_exiftool([Path(odd.name)], None)
+    assert len(found) == 1
+
+
+def test_programs_are_never_taken_from_the_current_folder(tmp_path, monkeypatch):
+    import os
+    import sys
+    from timelapse_core.programs import find_program
+    planted = tmp_path / ("exiftool.exe" if sys.platform.startswith("win") else "exiftool")
+    planted.write_text("#!/bin/sh\necho planted\n")
+    planted.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(tmp_path / "nowhere")]))
+    assert find_program("exiftool") is None

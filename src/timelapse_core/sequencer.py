@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from statistics import median
 
+from .exif import PROBLEMS as EXIFTOOL_PROBLEMS
 from .exif import exiftool_available, read_frames
 from .types import Frame, Problem, Sequence
 
@@ -90,7 +91,9 @@ def _check_settings_readable(frames: tuple[Frame, ...]) -> list[Problem]:
     if not missing:
         return []
     hint = ""
-    if any(f.path.suffix.lower() == ".cr3" for f in missing) and not exiftool_available():
+    if EXIFTOOL_PROBLEMS:
+        hint = " " + " ".join(f"{p}." for p in EXIFTOOL_PROBLEMS)
+    elif any(f.path.suffix.lower() == ".cr3" for f in missing) and not exiftool_available():
         hint = " Canon CR3 files need ExifTool installed (free: exiftool.org)."
     return [Problem(
         "unknown_settings",

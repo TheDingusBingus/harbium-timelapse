@@ -28,6 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         return 130
 
 
+def _fraction(text: str) -> float:
+    """argparse type: a number from 0 to 1, checked before any slow work."""
+    value = float(text)
+    if not 0.0 <= value <= 1.0:
+        raise argparse.ArgumentTypeError(f"must be between 0 and 1 (got {text})")
+    return value
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="timelapse", description="Free timelapse processing.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -39,7 +47,7 @@ def _main(argv: list[str] | None = None) -> int:
     flick.add_argument("folder", type=Path)
     flick.add_argument("--window", type=int, default=DEFAULT_WINDOW,
                        help=f"frames to smooth across (default {DEFAULT_WINDOW})")
-    flick.add_argument("--strength", type=float, default=1.0,
+    flick.add_argument("--strength", type=_fraction, default=1.0,
                        help="0 to 1, how much flicker to remove (default 1)")
     flick.add_argument("--fast", action="store_true",
                        help="measure from embedded previews: quicker, less exact")
@@ -158,6 +166,9 @@ def _finish(args) -> int:
                 print(file=sys.stderr)
         return progress
 
+    if args.fps <= 0 or (args.width is not None and args.width < 16) or args.window < 3:
+        print("Check the numbers: --fps above 0, --width at least 16, --window at least 3.", file=sys.stderr)
+        return 1
     if not (args.dry_run or args.out or args.video):
         print("Say where to put the result: --out FOLDER for frames, --video FILE.mp4, or both "
               "(or --dry-run to just measure).", file=sys.stderr)
@@ -187,14 +198,14 @@ def _finish(args) -> int:
         print("  Dry run: nothing written.")
         return 0
     try:
-        apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width, progress=bar("Writing"),
-                     fmt=args.format)
+        written = apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width,
+                               progress=bar("Writing"), fmt=args.format)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
     if args.out:
         from .finish import _wobble, LUMA
-        check = measure_channels(finished_frames(args.out), bar("Checking"))
+        check = measure_channels(written, bar("Checking"))
         print(f"  Measured on the corrected frames: brightness {_wobble(check @ LUMA):.3f} stops, "
               f"colour {_wobble(check[:, 0] - check[:, 2]):.3f}")
         print(f"  Corrected frames: {args.out}")

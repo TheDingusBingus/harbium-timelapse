@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +18,8 @@ from timelapse_core.cli import describe_changes
 from timelapse_core.deflicker import DEFAULT_WINDOW
 
 from . import apply, blend, check, label_keyframes, load, plan, rebuild, refine, restore, suggest, undo
+from timelapse_core.programs import find_program
+
 from .recover import RUNNING_MESSAGE, rapidraw_running
 from .whitebalance import DEFAULT_SMOOTHNESS, apply_white_balance, plan_white_balance, undo_white_balance
 from .keyframes import plan_blend
@@ -156,6 +157,15 @@ def _main(argv: list[str] | None = None) -> int:
         if not problems:
             print("  Looks good.")
         return 1 if any(p.serious for p in problems) else 0
+
+    # Problems that make results wrong stop commands that work out new values
+    # (recovery commands always run). --force overrides, for those who know.
+    blocking = [p for p in problems if p.kind in BLOCKING]
+    if (blocking and args.command in ("deflicker", "keyframes", "white-balance", "refine")
+            and not getattr(args, "dry_run", False) and not getattr(args, "force", False)):
+        print("  Not changing anything until that's sorted: the results would be wrong. "
+              "(If you're sure, add --force.)", file=sys.stderr)
+        return 1
 
     if args.command == "white-balance":
         return _white_balance(seq, args)
@@ -360,6 +370,9 @@ def _report_held(held: dict[str, str]) -> None:
             print(f"  Can't blend, so held from keyframe to keyframe: {shown}")
 
 
+BLOCKING = {"too_short", "mixed_files", "mixed_cameras"}
+
+
 def _run_stoppable(command: list[str]) -> int | None:
     """Run RapidRAW; on Ctrl+C stop it too (it otherwise keeps exporting on
     its own). Returns its exit code, or ``None`` if stopped."""
@@ -376,7 +389,7 @@ def _run_stoppable(command: list[str]) -> int | None:
 
 
 def _export(folder: Path, output: Path, rapidraw: str | None, quality: int, tiff16: bool = False) -> int:
-    exe = rapidraw or shutil.which("rapidraw")
+    exe = rapidraw or find_program("rapidraw") or find_program("RapidRAW")
     if not exe:
         print("Can't find the rapidraw command. Pass its location with --rapidraw.", file=sys.stderr)
         return 1
