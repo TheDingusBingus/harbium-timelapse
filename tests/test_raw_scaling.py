@@ -10,7 +10,7 @@ import types
 
 import numpy as np
 
-from timelapse_core import measure
+from harbium_timelapse import measure
 
 
 class FakeRaw:

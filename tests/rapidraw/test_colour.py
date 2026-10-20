@@ -5,12 +5,12 @@ worst where a variable ND was turned."""
 import numpy as np
 import pytest
 
-from test_keyframes import edit
+from test_rapidraw_keyframes import edit
 from test_rapidraw import exposures, jitter, make_sequence, sunset
 from test_refine import fake_render
-from timelapse_rapidraw import apply, blend, label_keyframes, load, plan, rebuild, refine, undo
-from timelapse_rapidraw.sidecar import read_sidecar
-from timelapse_rapidraw.state import read_ledger
+from harbium_timelapse.editors.rapidraw import apply, blend, label_keyframes, load, plan, rebuild, refine, undo
+from harbium_timelapse.editors.rapidraw.sidecar import read_sidecar
+from harbium_timelapse.editors.rapidraw.state import read_ledger
 
 N = 150
 PER_MIRED = -0.0152  # render warmth per mired of as-shot WB: measured on the real R6 sequence
@@ -51,7 +51,7 @@ def awb_sequence(tmp_path, monkeypatch):
     apply(plan(load(tmp_path), raw_brightness=raw))
     kelvin = as_shot_kelvin()
 
-    import timelapse_rapidraw.deflicker as d
+    import harbium_timelapse.editors.rapidraw.deflicker as d
     real_load = d.load
     def load_with_wb(folder, progress=None):
         s = real_load(folder, progress)
@@ -134,7 +134,7 @@ def test_no_colour_leaves_temperature_alone(awb_sequence):
 def test_smooth_follows_the_cameras_own_white_balance_minus_its_jitter(awb_sequence):
     """James's idea: heavily smooth the as-shot Kelvin. The camera's guessing
     goes; its overall drift (the auto look) and the light's real colour stay."""
-    from timelapse_core import smooth_brightness
+    from harbium_timelapse import smooth_brightness
     folder, images, raw, kelvin, loader = awb_sequence
     light_w = np.where(np.arange(N) < 100, 0.0, 0.15)      # lamps come on: a real colour change
     before = fake_colour(light_w, kelvin, temperatures(images))
@@ -152,7 +152,7 @@ def test_smooth_follows_the_cameras_own_white_balance_minus_its_jitter(awb_seque
 
 
 def test_smooth_is_the_default_only_with_kelvin(tmp_path):
-    images = make_sequence(tmp_path, 40)
+    make_sequence(tmp_path, 40)
     apply(plan(load(tmp_path), raw_brightness=np.zeros(40)))
     with pytest.raises(ValueError, match="needs ExifTool"):
         refine(load(tmp_path), render_brightness=np.zeros(40), raw_brightness=np.zeros(40),
@@ -191,7 +191,7 @@ def test_exposure_strength_is_remembered_not_learned_from_a_colour_pass():
     # A colour pass moves Temperature, which nudges brightness; Exposure doesn't
     # move. The next exposure pass must not read those nudges as the slider's
     # strength (on the real sequence that produced 1.5-stop errors).
-    from timelapse_rapidraw.refine import _slider_strength
+    from harbium_timelapse.editors.rapidraw.refine import _slider_strength
     n = 60
     applied = np.zeros(n)
     history = [{"render": np.zeros(n).tolist(), "applied": applied.tolist(), "strength": [2.1] * n}]
@@ -203,7 +203,7 @@ def test_exposure_strength_is_remembered_not_learned_from_a_colour_pass():
 def test_strength_relearned_from_earlier_passes_when_not_stored():
     # History written before strengths were stored: learn from the last pair of
     # passes where Exposure really moved, not from a colour-only change.
-    from timelapse_rapidraw.refine import _slider_strength
+    from harbium_timelapse.editors.rapidraw.refine import _slider_strength
     n = 60
     a0, a1 = np.zeros(n), np.full(n, -0.2)
     history = [{"render": np.zeros(n).tolist(), "applied": a0.tolist()},

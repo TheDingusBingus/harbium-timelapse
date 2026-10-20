@@ -1,9 +1,8 @@
 """Kelvin and tint from camera neutrals, on the standard DNG scale."""
 
-import numpy as np
 import pytest
 
-from timelapse_core.colour_temperature import (
+from harbium_timelapse.colour_temperature import (
     kelvin_tint_from_neutral, kelvin_tint_from_xy, neutral_from_kelvin_tint, xy_from_kelvin_tint,
 )
 

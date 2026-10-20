@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from timelapse_core import Sequence
+from harbium_timelapse import Sequence
 
 from .sidecar import (get_exposure, get_temperature, read_sidecar, set_exposure,
                       set_temperature, sidecar_path, write_sidecar)

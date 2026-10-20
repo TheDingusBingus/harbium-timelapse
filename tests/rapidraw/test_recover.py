@@ -4,16 +4,15 @@ keeping only the colour labels."""
 
 import json
 
-import numpy as np
 import pytest
 
-from test_keyframes import adjustment, edit
+from test_rapidraw_keyframes import edit
 from test_rapidraw import FIXTURES, exposures, jitter, make_sequence, sunset
 from test_refine import fake_render
-from timelapse_rapidraw import apply, blend, check, label_keyframes, load, plan, rebuild, refine
-from timelapse_rapidraw import cli
-from timelapse_rapidraw.sidecar import dump, read_sidecar, sidecar_path
-from timelapse_rapidraw.state import read_ledger
+from harbium_timelapse.editors.rapidraw import apply, blend, check, label_keyframes, load, plan, rebuild, refine
+from harbium_timelapse.editors.rapidraw import cli
+from harbium_timelapse.editors.rapidraw.sidecar import dump, read_sidecar, sidecar_path
+from harbium_timelapse.editors.rapidraw.state import read_ledger
 
 
 def rapidraw_saves_defaults(images):
@@ -94,7 +93,7 @@ def test_writing_commands_refuse_while_rapidraw_runs(tmp_path, monkeypatch, caps
 
 
 def test_the_guard_doesnt_mistake_this_tool_for_rapidraw():
-    from timelapse_rapidraw.recover import is_rapidraw
+    from harbium_timelapse.editors.rapidraw.recover import is_rapidraw
     assert is_rapidraw("RapidRAW.exe")
     assert is_rapidraw("rapidraw")
     assert not is_rapidraw("timelapse-rapidraw.exe")   # this tool's own command on Windows

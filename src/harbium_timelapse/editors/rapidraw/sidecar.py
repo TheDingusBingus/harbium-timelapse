@@ -22,7 +22,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from timelapse_core import Frame
+from harbium_timelapse import Frame
 
 SUFFIX = ".rrdata"
 

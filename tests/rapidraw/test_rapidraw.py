@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from timelapse_core import Frame
-from timelapse_rapidraw import apply, check, load, plan, undo
-from timelapse_rapidraw.sidecar import (
+from harbium_timelapse import Frame
+from harbium_timelapse.editors.rapidraw import apply, check, load, plan, undo
+from harbium_timelapse.editors.rapidraw.sidecar import (
     dump, get_exposure, read_sidecar, set_exposure, sidecar_path, with_sidecar_settings,
 )
 
@@ -186,7 +186,7 @@ def test_clean_sequence_has_no_problems(tmp_path):
 
 
 def test_export_can_ask_for_sixteen_bit_tiff(tmp_path, monkeypatch):
-    from timelapse_rapidraw import cli as rcli
+    from harbium_timelapse.editors.rapidraw import cli as rcli
     calls = []
     monkeypatch.setattr(rcli, "_run_stoppable", lambda cmd: calls.append(cmd) or 1)
     rcli._export(tmp_path, tmp_path / "out", "rapidraw", 95, tiff16=True)
@@ -196,7 +196,7 @@ def test_export_can_ask_for_sixteen_bit_tiff(tmp_path, monkeypatch):
 
 
 def test_ctrl_c_stops_rapidraw_too(monkeypatch):
-    from timelapse_rapidraw import cli as rcli
+    from harbium_timelapse.editors.rapidraw import cli as rcli
     events = []
     class Fake:
         def __init__(self, cmd): events.append("started")

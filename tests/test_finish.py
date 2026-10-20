@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from timelapse_core import cli
-from timelapse_core.finish import (
+from harbium_timelapse import cli
+from harbium_timelapse.finish import (
     LUMA, _linear_to_srgb, _wobble, apply_finish, correct, finished_frames, measure_channels, plan_finish,
 )
 
@@ -149,7 +149,7 @@ def test_rejects_unknown_output_format(tmp_path):
 
 
 def test_deflicker_measurement_reads_sixteen_bit_tiff(tmp_path):
-    from timelapse_core import measure_light
+    from harbium_timelapse import measure_light
     b, _ = measure_light(dark_export(tmp_path / "e", "tif"))
     true = (TREND + WOBBLE) @ LUMA
     assert np.abs((b - b.mean()) - (true - true.mean())).max() < 0.02

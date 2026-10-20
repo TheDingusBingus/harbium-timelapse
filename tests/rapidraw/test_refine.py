@@ -2,13 +2,12 @@
 is stronger than real light, by different amounts at different brightnesses,
 as measured on a real Canon R6 dusk sequence (1.8x in daylight, 1.4x at night)."""
 
-import json
 
 import numpy as np
 import pytest
 
 from test_rapidraw import exposures, jitter, make_sequence, sunset
-from timelapse_rapidraw import apply, load, plan, refine, undo
+from harbium_timelapse.editors.rapidraw import apply, load, plan, refine, undo
 
 
 def slider_strength(seen):

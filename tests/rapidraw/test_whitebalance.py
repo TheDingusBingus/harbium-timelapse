@@ -2,21 +2,20 @@
 sidecars: "whiteBalance": {"temperature": 5600, "tint": 0}), from as-shot
 Kelvin shaped like the real R6 sequence's Auto WB."""
 
-import json
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from test_keyframes import edit
+from test_rapidraw_keyframes import edit
 from test_rapidraw import exposures, jitter, make_sequence, sunset
-from timelapse_core import Sequence
-from timelapse_rapidraw import (
+from harbium_timelapse import Sequence
+from harbium_timelapse.editors.rapidraw import (
     apply, apply_white_balance, check, load, plan, plan_white_balance, rebuild, undo, undo_white_balance,
 )
-from timelapse_rapidraw import cli
-from timelapse_rapidraw.sidecar import dump, read_sidecar, sidecar_path
+from harbium_timelapse.editors.rapidraw import cli
+from harbium_timelapse.editors.rapidraw.sidecar import dump, read_sidecar, sidecar_path
 
 REAL = Path(__file__).parent / "fixtures" / "r6_dusk_as_shot_kelvin.txt"
 
@@ -64,7 +63,7 @@ def test_smooth_removes_the_jumps_and_keeps_the_journey(folder):
 
 def test_on_the_real_r6_sequence():
     k = np.array([float(l) for l in REAL.read_text().splitlines() if l and not l.startswith("#")])
-    from timelapse_core import smooth_brightness
+    from harbium_timelapse import smooth_brightness
     smooth = 1e6 / smooth_brightness(1e6 / k, 50)
     assert np.abs(np.diff(k)).max() > 600                              # 669 K jumps from the camera
     assert np.abs(np.diff(smooth)).max() < 50
@@ -130,7 +129,7 @@ def test_cli_refuses_while_rapidraw_runs(folder, monkeypatch, capsys):
 
 
 def test_keyframe_blend_keeps_the_steady_white_balance(folder):
-    from timelapse_rapidraw import blend, label_keyframes
+    from harbium_timelapse.editors.rapidraw import blend, label_keyframes
     path, images, kelvin = folder
     seq = with_kelvin(load(path), kelvin)
     apply_white_balance(seq, plan_white_balance(seq))
@@ -146,8 +145,8 @@ def test_keyframe_blend_keeps_the_steady_white_balance(folder):
 
 # --- exact: as-shot on RapidRAW's own scale, from raw neutrals -------------------
 
-from timelapse_core.colour_temperature import neutral_from_kelvin_tint
-from timelapse_rapidraw.cameras import MATRICES
+from harbium_timelapse.colour_temperature import neutral_from_kelvin_tint
+from harbium_timelapse.editors.rapidraw.cameras import MATRICES
 
 R6 = "Canon EOS R6"
 

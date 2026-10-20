@@ -9,9 +9,9 @@ partly undid it. Measuring the still part of the scene fixes both.
 import numpy as np
 from PIL import Image
 
-from timelapse_core import measure_light
-from timelapse_core.finish import LUMA, _linear_to_srgb, apply_finish, finished_frames, plan_finish
-from timelapse_core.measure import steady_change
+from harbium_timelapse import measure_light
+from harbium_timelapse.finish import LUMA, _linear_to_srgb, apply_finish, finished_frames, plan_finish
+from harbium_timelapse.measure import steady_change
 
 N = 40
 rng = np.random.default_rng(3)

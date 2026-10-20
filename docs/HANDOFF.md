@@ -1,9 +1,9 @@
-# timelapse-core — Handoff & Working Log
+# harbium-timelapse — Handoff & Working Log
 
 _Prepared 9 October 2026, for moving into the end-to-end editor project._
 _Companion to `docs/SCAFFOLD.md` (the design record: every decision and why). This file is the story, the state, and what's next. Read this first, then the scaffold sections it points to._
 
-> **Current state (19 Oct 2026):** the workflow is **deflicker (+ white-balance) → one export → `timelapse finish`**; `refine` is optional. On the real R6 sequence the finished video measured 0.012 stops brightness change (the light's own pace) and 0.006 colour wobble; by eye "better than LRTimelapse, and significantly easier". Read **Addendum 2** at the end for everything learned on the way (Dehaze, LibRaw auto-maximum, crowds, 8-bit averaging). Next: a second, different sequence; patch-weighted measuring in `finish` for the small steps left at big ND turns.
+> **Current state (20 Oct 2026):** renamed **harbium-timelapse** (one package: core + editor adapters; RapidRAW built in). Workflow: **`timelapse prepare FOLDER` → one export → `timelapse finish EXPORT --video film.mp4`**; `refine` is optional. A full code review (docs: Addendum 3) fixed two critical and three high issues before the first public push. On the real R6 sequence the finished video measured 0.012 stops brightness change (the light's own pace) and 0.006 colour wobble; by eye "better than LRTimelapse, and significantly easier". Read **Addendum 2** at the end for everything learned on the way (Dehaze, LibRaw auto-maximum, crowds, 8-bit averaging). Next: a second, different sequence; patch-weighted measuring in `finish` for the small steps left at big ND turns.
 
 ---
 
@@ -18,8 +18,8 @@ A free, MIT-licensed Python library for timelapse processing, in photographer la
 **Two packages, one repo.** Core never imports the integration; the integration depends on core.
 
 ```
-timelapse-core/
-├── src/timelapse_core/            MIT, editor-agnostic
+harbium-timelapse/
+├── src/harbium_timelapse/            MIT, editor-agnostic
 │   ├── types.py        THE CONTRACT: Frame, Sequence, Problem, FlickerCorrections, ExposureChange
 │   ├── exif.py         ExifTool batch (argfile, 100/batch) → exifread fallback. Reads as-shot Kelvin.
 │   ├── sequencer.py    load, order by capture time, check (gaps, mixed files, setting changes)
@@ -30,7 +30,7 @@ timelapse-core/
 │   ├── render.py       preview MP4 via ffmpeg: --fps, --width, --max-mb, --blend-frames
 │   └── cli.py          `timelapse check | deflicker | render`
 ├── integrations/rapidraw/          separate package `timelapse-rapidraw`, MIT, no RapidRAW code
-│   └── src/timelapse_rapidraw/
+│   └── src/harbium_timelapse.editors.rapidraw/
 │       ├── sidecar.py      .rrdata read/write, byte-faithful, atomic
 │       ├── deflicker.py    plan/apply/undo, ledger, keyframe-aware check, overwrite detection
 │       ├── keyframes.py    purple labels, blend every setting incl. curves, keyframes never rewritten
@@ -105,7 +105,7 @@ Chronological. Each line: what happened → what it changed.
 **Risks**
 - **RapidRAW is a moving target** (sidecar format changed in 1.6.3; behaviour undocumented). Two surprises so far. Every integration claim is pinned to versions tested in Oct 2026.
 - **Old git history on GitHub:** if the repo was pushed before the scrub, the serial number is in that history. Delete and re-push the cleaned repo.
-- Package name `timelapse-core` is generic on PyPI; check before publishing.
+- Package name `harbium-timelapse` is generic on PyPI; check before publishing.
 
 ---
 
@@ -184,9 +184,9 @@ timelapse-rapidraw restore "FOLDER"               :: everything back to before t
 - **RapidRAW decodes at each frame's own as-shot WB** and only adapts when `whiteBalance` is set. With `null`, Auto WB's per-frame multipliers reach the pixels (colour *and* some brightness). Hypothesis: part of the original overshoot. Prediction: with exact WB applied, `refine` converges in fewer passes.
 
 **Built (branch `white-balance-exact`, 97 core + 71 RapidRAW tests passing):**
-- `timelapse_core/colour_temperature.py` — neutral ↔ Kelvin/tint, written from the published standards (Robertson table, DNG dual-illuminant interpolation). No editor code. Checked against a real frame: a solved neutral `0.644 1 0.474` → tint **+20** (Lightroom read **+21**); Kelvin 3,790 vs Lightroom's 3,550 — a *matrix* difference (Lightroom's R6 profile vs rawler's), not maths. **Lesson: the neutral is the portable truth; Kelvin is per-editor.**
+- `harbium_timelapse/colour_temperature.py` — neutral ↔ Kelvin/tint, written from the published standards (Robertson table, DNG dual-illuminant interpolation). No editor code. Checked against a real frame: a solved neutral `0.644 1 0.474` → tint **+20** (Lightroom read **+21**); Kelvin 3,790 vs Lightroom's 3,550 — a *matrix* difference (Lightroom's R6 profile vs rawler's), not maths. **Lesson: the neutral is the portable truth; Kelvin is per-editor.**
 - `Frame.white_balance_neutral` (contract, optional) read by ExifTool from `WB_RGGBLevelsAsShot` (Canon) or `AsShotNeutral` (DNG).
-- `timelapse_rapidraw/cameras.py` — RapidRAW's (rawler's) matrices; R6 only so far.
+- `harbium_timelapse.editors.rapidraw/cameras.py` — RapidRAW's (rawler's) matrices; R6 only so far.
 - `white-balance` now works out as-shot on RapidRAW's own scale, smooths mireds *and* tint, writes both. With no jitter it writes exactly RapidRAW's as-shot (identity test). Falls back to the old behaviour with a printed note when the neutral or camera is unknown. `--tint` now defaults to automatic.
 
 **To verify on return (RapidRAW closed):**
@@ -220,3 +220,17 @@ timelapse-rapidraw restore "FOLDER"               :: everything back to before t
 
 **Dark frames need 16 bits (added later, 19 Oct):** after the crowd fix, the checker (`find_odd_frames.py`, robust per-patch view) still found ~0.1 residuals at 1800–1801 and small leftover steps at the ND turns 1645/1659; James: "perceivable, not aggressive". Chain: at the ISO steps (RAW steps land at 1802 and 1804, one frame after the 1801 EXIF change for the first) deflicker's RAW-exact corrections still overshoot in RapidRAW (the 1.18 ratio) and the grade's colour grading turns that brightness error into a colour shift (export: −0.21 brightness, +0.22 warmth at 1802). `finish` must then undo ~0.2 + 0.2 on the darkest, 8-bit frames, where shadows have few levels. Synthetic night scene with light trails: 8-bit JPEG measures with error 0.03 (worst 0.08) by either statistic; 16-bit TIFF: 0.000. Added: measurement reads 16-bit TIFF (tifffile), `finish --format jpg` (correct in 16-bit, write JPEGs), `timelapse-rapidraw export --tiff16`. Open: a colour shift that depends on brightness (colour grading) can't be fully undone by one gain per channel; whatever remains after 16-bit is that.
 **Correction (same day):** the "8-bit can't measure night frames" result came from a synthetic scene with no sensor noise (every pixel rounded identically every frame). With realistic per-frame noise, 8-bit JPEG measured by AVERAGING blocks in linear light (not skipping pixels) gives error 0.005 (worst 0.013), close to 16-bit. `finish` now averages (lookup table, float32, ~0.75 s per 20 MP frame). 16-bit TIFF export (`--tiff16`) stays available but is not the default: full-res 16-bit exports from RapidRAW are slow (no headless resize) and up to ~27 GB.
+
+
+---
+
+## Addendum 3 — 20 Oct 2026: full review, fixes, rename, editor plug-ins
+
+**Review** (every module read; ruff + bandit; coverage 89%; ~30 probes with awkward inputs). Fixed, each with a regression test that reproduced it first:
+- **Critical:** one black or blown frame (lens cap) carried NaN through the frame-to-frame chain and the smoother: 20 of 30 frames got NaN; `finish` wrote 20 pure-black frames and reported success. Now unmeasurable frames are skipped (the chain bridges them, the smoother gives them no weight), left uncorrected, and named. Non-finite values are refused everywhere before writing.
+- **High:** RapidRAW writes saved the ledger only at the end, so an interrupted run left corrections the record didn't know about and the next run stacked corrections on corrections. Now `ledger_kept_in_step` updates the record as each sidecar is written and saves it however the block ends; every value is validated before the first write; JSON is written atomically; a damaged record gives a plain explanation (restore, or delete it) instead of a traceback; `rebuild` keeps a safety copy until it finishes. Verified: interrupted after 12 of 30 frames, rerun = identical to a clean run.
+- **Medium/low:** `--window` under 3 was a silent no-op (now refused); `finish --out` into a folder with other frames mixed them (now refused; reruns allowed) and its self-check read stale files (now only what it wrote); mixed frame sizes are caught before writing; fps/width/strength checked before slow work; odd widths rounded; missing folders created; flawed folders (RAW+JPEG, two cameras) refused unless `--force`; ExifTool failures and timeouts reported instead of swallowed.
+- **Security (low):** file names starting with `-` were read by ExifTool as options (reproduced; now absolute paths); programs are looked up only on PATH, never the current folder (Windows planting). No network, no shell, no secrets.
+- Not yet done (in CODE_REVIEW.md): settings cache and parallel measuring (speed), lock against two runs at once, Windows long paths, renamed-file detection.
+
+**Structure:** one package `harbium-timelapse` (import `harbium_timelapse`), commands `timelapse` and `timelapse-rapidraw`. Editors are plug-ins: `harbium_timelapse.editors.Editor` (detect, is_running, load, prepare, undo) plus the `harbium_timelapse.editors` entry-point group; RapidRAW is the built-in reference adapter. New commands: `timelapse prepare | undo | editors`. The on-disk working folder stays `.timelapse-core` for compatibility with existing sequences. Guide: `docs/EDITORS.md`.

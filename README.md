@@ -1,58 +1,59 @@
-# timelapse-core
+# harbium-timelapse
 
-Free, open timelapse processing, written in the language photographers already use.
+Free timelapse deflicker and steady white balance, **measured, not guessed**. An LRTimelapse alternative that works with any editor.
 
-Timelapse sequences flicker. Exposure wobbles a fraction of a stop from frame to frame, and in a finished video that wobble reads as a shimmer. Fixing it properly has mostly meant paid tools. This library is a small attempt to do the same job for free, as something other editors can call rather than another app to learn.
+Timelapses flicker: exposure wobbles a fraction of a stop from frame to frame, and the camera's auto white balance jumps around, so a finished video shimmers and shifts colour. This tool removes that, with two commands and one export.
 
-It's early, and honest about it: proven on one real sequence so far (229 frames, Canon R6, dusk into night, ND turns, ISO steps, crowds, light trails, RapidRAW on Windows). On that sequence the finished video measured **0.012 stops** of frame-to-frame brightness change (the light's own pace at dusk, i.e. no flicker left) and **0.006** of colour wobble, from **one export and one command**. A second sequence is next before any bigger claims.
+It's early, and honest about it: proven on one real sequence so far (229 frames, Canon R6, dusk into night, ND turns, ISO steps, crowds, light trails, RapidRAW on Windows). The finished video measured **0.012 stops** of frame-to-frame brightness change (the light's own pace at dusk: no flicker left) and **0.006** of colour wobble. A second sequence is next before any bigger claims.
 
-## The workflow
+## Three steps
 
-1. **Deflicker and steady the white balance on the RAWs** (in RapidRAW: `timelapse-rapidraw deflicker` and `timelapse-rapidraw white-balance`; in any editor: apply the corrections `timelapse deflicker` works out). This does the heavy lifting before your grade, where highlights and shadows still have room.
-2. **Export once**, from whatever editor you use.
-3. **`timelapse finish`** on the exported frames: it measures each frame and takes out the last flicker and colour wobble directly on the pixels, then writes a video and/or corrected frames.
+```bash
+timelapse prepare  ~/Pictures/sunset                         # 1. steady white balance + deflicker, into your editor's edits
+#                                                            # 2. grade as you like, export every frame (JPEG is fine)
+timelapse finish   ~/Pictures/sunset-export --video sunset.mp4   # 3. last wobble out, straight to video
+```
 
-Step 3 works after *any* editor: it doesn't need to know how your editor's sliders behave, so tone mappers, dehaze and the rest can't trip it up.
+1. **`prepare`** finds your editor's edit files, steadies the white balance and removes the flicker *before* your grade, where highlights and shadows still have room. It never touches the photos themselves, and `timelapse undo` takes it all back out.
+2. **Export once**, from your editor, with your look on it.
+3. **`finish`** measures every exported frame and takes out what's left, directly on the pixels. It doesn't need to know how your editor's sliders behave, so tone mappers and "smart" tools can't trip it up.
 
-## What it does now
+**Using an editor `prepare` doesn't support yet?** Skip step 1: grade, export, run `finish`. Step 1 matters most for big exposure changes (ND turns, ISO steps). `timelapse editors` shows what's supported; [adding an editor](docs/EDITORS.md) is a small class.
 
-- **Checks a sequence** before you process it: missing frames, mixed RAW+JPEG folders, exposure setting changes, unreadable files. In sentences, not error codes.
-- **Measures brightness** of every frame, in stops, from the RAW data itself.
-- **Works out deflicker corrections**: how much to brighten or darken each frame so the light follows its real arc without the shimmer.
-- **Suggests keyframes** where the light itself changes, in brightness or colour, and blends values smoothly between them.
-- **Finishes exported frames** (`timelapse finish`): one brightness and colour correction per frame, measured on the still part of the scene so walkers, cars and light trails can't sway it. No masks, nothing local, no halos.
-- **Steady white balance in RapidRAW**, exact to RapidRAW's own Kelvin and tint scale, from each frame's raw colour.
-- **Smooths out your own exposure changes.** ISO steps, shutter changes, and hand-turned ND filters (found from the pictures, since an ND leaves no trace in the file) are blended into one gentle ramp instead of jolts.
+## What it does
 
-It never touches your original files.
+- **Checks a sequence** first: missing frames, mixed RAW+JPEG, two cameras, exposure setting changes, frames that are black or blown. In sentences, not error codes.
+- **Measures the still part of the scene**, so walkers, cars, birds and light trails don't sway it, and from the RAW data with identical scaling for every frame.
+- **Removes flicker and keeps the light's real journey** (sunset, blue hour, night), and smooths out your own exposure changes: ISO and shutter steps, and hand-turned ND filters (found from the pictures, since an ND leaves no trace in the file).
+- **Steadies auto white balance** frame to frame, exactly on the editor's own Kelvin and tint scale.
+- **Finishes exported frames**: one brightness and colour correction per frame. No masks, nothing local, no halos.
+- Safe by design: originals untouched, edit files backed up before the first change, interrupted runs can simply be run again, and nothing is written while your editor is open.
 
 ## Install
 
 ```bash
-pip install "timelapse-core[raw] @ git+https://github.com/[[ username ]]/timelapse-core"
+pip install "harbium-timelapse[raw] @ git+https://github.com/[[ username ]]/harbium-timelapse"
 ```
 
-For Canon CR3 files (and generally the most reliable settings reading), also install [ExifTool](https://exiftool.org). It's free. For videos, install [ffmpeg](https://ffmpeg.org). For 16-bit TIFF exports, add the `tiff` extra (`timelapse-core[raw,tiff]`).
+Also install [ExifTool](https://exiftool.org) (camera settings; needed for Canon CR3) and [ffmpeg](https://ffmpeg.org) (videos). Both are free. For 16-bit TIFF exports, use `harbium-timelapse[raw,tiff]`.
 
-## Use
-
-From the command line:
+## All commands
 
 ```bash
-timelapse check ~/Pictures/sunset
-timelapse deflicker ~/Pictures/sunset --csv corrections.csv
-timelapse render ~/Pictures/sunset-exported --fps 24      # quick preview video (needs ffmpeg)
-timelapse render ~/Pictures/sunset-exported --max-mb 10   # under 10 MB, for sending
-timelapse finish ~/Pictures/sunset-exported --video sunset.mp4        # last flicker + colour wobble out, straight to video
-timelapse finish ~/Pictures/sunset-exported --out ~/Pictures/sunset-final   # or corrected frames for your video editor
-# Optional, for maximum precision in very dark sequences: correct 16-bit TIFFs, write JPEGs
-timelapse finish ~/Pictures/sunset-tiff16 --format jpg --out ~/Pictures/sunset-final --video sunset.mp4
+timelapse prepare  FOLDER [--dry-run] [--no-white-balance] [--editor rapidraw]
+timelapse finish   EXPORT --video film.mp4 [--out FOLDER] [--format jpg] [--width 3840] [--brightness-only]
+timelapse undo     FOLDER
+timelapse check    FOLDER                 # look before you leap
+timelapse deflicker FOLDER --csv c.csv    # just the numbers, for any editor
+timelapse render   EXPORT --max-mb 10     # quick preview video
+timelapse editors                         # which editors prepare can write to
+timelapse-rapidraw ...                    # RapidRAW extras: keyframes, refine, export, rebuild (docs/RAPIDRAW.md)
 ```
 
 From Python:
 
 ```python
-from timelapse_core import load_sequence, check_sequence, smooth_flicker
+from harbium_timelapse import load_sequence, check_sequence, smooth_flicker
 
 seq = load_sequence("~/Pictures/sunset")
 
@@ -71,11 +72,11 @@ fix.by_filename()                          # {"IMG_0001.CR3": +0.04, ...} in sto
 2. A smooth line is drawn through those readings. Each point on it comes from a short straight line fitted through that frame's neighbours, closest neighbours trusted most. The ends of the sequence don't droop, and a single odd frame (lightning, headlights) is recognised and doesn't pull its neighbours with it.
 3. Each frame's correction is the gap between where it measured and where the line says it should be.
 
-The full reasoning lives in the docstrings of [`deflicker.py`](src/timelapse_core/deflicker.py) and [`measure.py`](src/timelapse_core/measure.py).
+The full reasoning lives in the docstrings of [`deflicker.py`](src/harbium_timelapse/deflicker.py) and [`measure.py`](src/harbium_timelapse/measure.py).
 
 ## RapidRAW
 
-If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-rapidraw` writes the corrections into each frame's exposure for you. See [integrations/rapidraw](integrations/rapidraw/README.md).
+If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse prepare` writes into its `.rrdata` edit files directly. `timelapse-rapidraw` adds keyframes (purple labels, every setting blended between them), `refine`, headless `export` and `rebuild`. See [docs/RAPIDRAW.md](docs/RAPIDRAW.md).
 
 ## Pitfalls we measured (RapidRAW)
 
@@ -85,7 +86,10 @@ If you edit in [RapidRAW](https://github.com/CyberTimon/RapidRAW), `timelapse-ra
 ## Plans
 
 - A second, different test sequence before bigger claims
+- Lightroom / Camera Raw adapter (XMP), then RawTherapee and darktable
+- A simple window (no command line) and a one-click installer with ExifTool and ffmpeg included
 - Patch-weighted measuring in `finish` (small steps can survive at big ND turns)
+- Camera-settings cache, so repeat runs on a slow drive are near-instant
 - Faster measuring, using every CPU core
 - Motion blur between frames
 
@@ -115,4 +119,4 @@ are run as separate programs if you have them installed.
 
 MIT. Use it, change it, build it into something else.
 
-RapidRAW is AGPL-3.0 and is not modified or included here. Integrations talk to it only through its own sidecar files and command line.
+RapidRAW is AGPL-3.0 and is not modified or included here. The adapter talks to it only through its own edit files and command line.

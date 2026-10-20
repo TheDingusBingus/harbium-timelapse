@@ -13,12 +13,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from timelapse_core import load_sequence, measure_brightness, smooth_brightness
-from timelapse_core.cli import describe_changes
-from timelapse_core.deflicker import DEFAULT_WINDOW
+from harbium_timelapse import load_sequence, measure_brightness, smooth_brightness
+from harbium_timelapse.cli import describe_changes
+from harbium_timelapse.deflicker import DEFAULT_WINDOW
 
 from . import apply, blend, check, label_keyframes, load, plan, rebuild, refine, restore, suggest, undo
-from timelapse_core.programs import find_program
+from harbium_timelapse.programs import find_program
 
 from .recover import RUNNING_MESSAGE, rapidraw_running
 from .whitebalance import DEFAULT_SMOOTHNESS, apply_white_balance, plan_white_balance, undo_white_balance

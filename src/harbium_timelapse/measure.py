@@ -307,7 +307,7 @@ def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:
         import rawpy
     except ImportError as e:
         raise ImportError(
-            "Reading RAW files needs rawpy. Install it with: pip install 'timelapse-core[raw]'"
+            "Reading RAW files needs rawpy. Install it with: pip install 'harbium-timelapse[raw]'"
         ) from e
 
     with rawpy.imread(str(path)) as raw:

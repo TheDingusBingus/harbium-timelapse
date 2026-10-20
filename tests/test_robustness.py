@@ -5,10 +5,10 @@ corrections and finish wrote 20 pure-black frames."""
 import numpy as np
 from PIL import Image
 
-from timelapse_core import cli, measure_light, smooth_flicker
-from timelapse_core.deflicker import smooth_brightness
-from timelapse_core.finish import _linear_to_srgb, apply_finish, finished_frames, plan_finish
-from timelapse_core.sequencer import load_sequence
+from harbium_timelapse import cli, smooth_flicker
+from harbium_timelapse.deflicker import smooth_brightness
+from harbium_timelapse.finish import _linear_to_srgb, apply_finish, finished_frames, plan_finish
+from harbium_timelapse.sequencer import load_sequence
 
 N = 30
 rng = np.random.default_rng(1)
@@ -96,7 +96,7 @@ def test_mixed_sizes_refused_before_anything_is_written(tmp_path):
 
 @pytest.mark.skipif(shutil.which("exiftool") is None, reason="needs ExifTool")
 def test_file_named_like_an_option_is_read_as_a_file(tmp_path, monkeypatch):
-    from timelapse_core.exif import _read_with_exiftool
+    from harbium_timelapse.exif import _read_with_exiftool
     fs = frames(tmp_path / "e")
     odd = fs[0].parent / "-delete_original!.png"
     fs[0].rename(odd)
@@ -109,7 +109,7 @@ def test_file_named_like_an_option_is_read_as_a_file(tmp_path, monkeypatch):
 def test_programs_are_never_taken_from_the_current_folder(tmp_path, monkeypatch):
     import os
     import sys
-    from timelapse_core.programs import find_program
+    from harbium_timelapse.programs import find_program
     planted = tmp_path / ("exiftool.exe" if sys.platform.startswith("win") else "exiftool")
     planted.write_text("#!/bin/sh\necho planted\n")
     planted.chmod(0o755)

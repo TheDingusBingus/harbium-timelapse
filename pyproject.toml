@@ -3,12 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "timelapse-core"
-version = "0.1.0"
-description = "Free, open timelapse processing in photographer language: deflicker, day-to-night ramps, sequence checks."
+name = "harbium-timelapse"
+version = "0.2.0"
+description = "Free timelapse deflicker and steady white balance, measured not guessed. An LRTimelapse alternative that works after any editor."
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "James Harbour" }]
 requires-python = ">=3.10"
+keywords = ["timelapse", "deflicker", "photography", "raw", "white balance", "rapidraw"]
 dependencies = [
   "numpy>=1.24",
   "pillow>=10",
@@ -21,10 +23,16 @@ tiff = ["tifffile>=2023.1"]
 dev = ["pytest>=8", "rawpy>=0.21"]
 
 [project.scripts]
-timelapse = "timelapse_core.cli:main"
+timelapse = "harbium_timelapse.cli:main"
+timelapse-rapidraw = "harbium_timelapse.editors.rapidraw.cli:main"
+
+# Editors are plug-ins. Another package can add one by declaring an entry point
+# in this group; `timelapse prepare` then finds it automatically.
+[project.entry-points."harbium_timelapse.editors"]
+rapidraw = "harbium_timelapse.editors.rapidraw.adapter:RapidRAW"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/timelapse_core"]
+packages = ["src/harbium_timelapse"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

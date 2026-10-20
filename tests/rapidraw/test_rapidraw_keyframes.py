@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 
 from test_rapidraw import jitter, make_sequence, sunset
-from timelapse_rapidraw import (
+from harbium_timelapse.editors.rapidraw import (
     apply, blend, check, keyframes_in, label_keyframes, load, plan, restore,
 )
-from timelapse_rapidraw.sidecar import dump, read_sidecar, sidecar_path
+from harbium_timelapse.editors.rapidraw.sidecar import dump, read_sidecar, sidecar_path
 
 
 def edit(image, **changes):
@@ -244,7 +244,7 @@ def test_flat_line_clipping_blends(sunset_folder):
 
 
 def test_curve_tracing_matches_the_points():
-    from timelapse_rapidraw.keyframes import _curve_at
+    from harbium_timelapse.editors.rapidraw.keyframes import _curve_at
     c = curve((0, 0), (128, 150), (255, 255))
     assert _curve_at(c, [0, 128, 255]) == [0, 150, 255]
     traced = _curve_at(c, list(range(256)))

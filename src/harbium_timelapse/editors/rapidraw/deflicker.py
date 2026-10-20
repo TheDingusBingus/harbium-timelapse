@@ -22,11 +22,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from timelapse_core import (
+from harbium_timelapse import (
     FlickerCorrections, Frame, Problem, Sequence, check_sequence,
     load_sequence, measure_brightness, smooth_flicker,
 )
-from timelapse_core.deflicker import DEFAULT_WINDOW
+from harbium_timelapse.deflicker import DEFAULT_WINDOW
 
 from .sidecar import (
     finite,

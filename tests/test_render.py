@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from synthetic import make_folder
-from timelapse_core import render_video
+from harbium_timelapse import render_video
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffprobe"), reason="ffmpeg not installed")
 

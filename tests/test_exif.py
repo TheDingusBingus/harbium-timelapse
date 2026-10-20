@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from synthetic import scene, write_jpeg
-from timelapse_core.exif import read_frame
-from timelapse_core.types import Frame
+from harbium_timelapse.exif import read_frame
+from harbium_timelapse.types import Frame
 
 
 def test_reads_settings_from_jpeg(tmp_path):
@@ -41,7 +41,7 @@ def test_exposure_value():
 def test_exiftool_reads_a_big_folder_with_a_long_awkward_path(tmp_path, monkeypatch):
     """The Windows hang: hundreds of long paths. Batched through an argument file now."""
     from datetime import timedelta
-    from timelapse_core import exif
+    from harbium_timelapse import exif
 
     # Prove ExifTool did the reading: make the fallback reader return nothing.
     monkeypatch.setattr(exif, "_read_with_exifread", lambda p: Frame(path=p))

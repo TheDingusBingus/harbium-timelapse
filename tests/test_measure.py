@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 from synthetic import make_folder, scene
-from timelapse_core import measure_brightness
-from timelapse_core.measure import brightness_of
+from harbium_timelapse import measure_brightness
+from harbium_timelapse.measure import brightness_of
 
 
 def test_one_stop_measures_as_one_stop():

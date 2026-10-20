@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from timelapse_core import Frame, Sequence, find_exposure_changes, smooth_flicker
+from harbium_timelapse import Frame, Sequence, find_exposure_changes, smooth_flicker
 
 
 def dusk(n, drop=2.0):

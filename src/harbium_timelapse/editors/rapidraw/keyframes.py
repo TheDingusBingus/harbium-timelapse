@@ -33,8 +33,8 @@ import json
 from dataclasses import dataclass, field
 
 import numpy as np
-from timelapse_core import Sequence, blend_between, measure_light, suggest_keyframes
-from timelapse_core.keyframes import KeyframeSuggestion
+from harbium_timelapse import Sequence, blend_between, measure_light, suggest_keyframes
+from harbium_timelapse.keyframes import KeyframeSuggestion
 
 from .sidecar import get_exposure, read_sidecar, set_exposure, write_sidecar
 from .state import STATE_DIR, keep_original, ledger_kept_in_step, read_ledger

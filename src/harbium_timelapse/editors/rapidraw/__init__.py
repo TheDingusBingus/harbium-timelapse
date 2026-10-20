@@ -1,6 +1,6 @@
 """Deflicker RapidRAW timelapses through RapidRAW's own sidecar files.
 
-    from timelapse_rapidraw import load, check, plan, apply, undo
+    from harbium_timelapse.editors.rapidraw import load, check, plan, apply, undo
 
     seq = load("~/Pictures/sunset")
     for problem in check(seq):

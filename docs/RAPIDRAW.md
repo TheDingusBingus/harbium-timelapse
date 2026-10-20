@@ -1,8 +1,10 @@
-# timelapse-rapidraw
+# RapidRAW
 
-Deflicker [RapidRAW](https://github.com/CyberTimon/RapidRAW) timelapses. Uses
-[timelapse-core](../../README.md) to work out the corrections, then writes them
-into each frame's exposure in RapidRAW's own sidecar files.
+[RapidRAW](https://github.com/CyberTimon/RapidRAW) is supported out of the box:
+`timelapse prepare FOLDER` writes steady white balance and deflicker into its
+`.rrdata` edit files. This page covers the extras in `timelapse-rapidraw`
+(installed with [harbium-timelapse](../README.md)): keyframes, refine, headless
+export and rebuild.
 
 ## Before you start
 
@@ -13,7 +15,18 @@ into each frame's exposure in RapidRAW's own sidecar files.
    to run while it's open: with the folder open, RapidRAW can save its own copy
    over them.
 
-## Use
+## The everyday workflow
+
+```bash
+timelapse prepare ~/Pictures/sunset                       # white balance + deflicker
+timelapse-rapidraw export ~/Pictures/sunset ~/Pictures/sunset-export   # or export from RapidRAW
+timelapse finish ~/Pictures/sunset-export --video sunset.mp4
+```
+
+**Don't use Dehaze** on a sequence with exposure changes: RapidRAW measures haze
+before Exposure is applied, so ND turns and ISO steps become contrast jumps.
+
+## Individual commands
 
 ```bash
 timelapse-rapidraw check ~/Pictures/sunset

@@ -25,7 +25,7 @@ at 7000 K.
 
 Kelvin and tint are on RapidRAW's own scale, worked out from each frame's raw
 as-shot neutral with the colour matrices RapidRAW itself uses (``cameras.py``)
-and the standard DNG maths (``timelapse_core.colour_temperature``). With no
+and the standard DNG maths (``harbium_timelapse.colour_temperature``). With no
 jitter to remove, what's written is exactly what RapidRAW already shows as
 shot, so the only change is the smoothing. Tint is smoothed alongside. If the
 neutral or the camera's matrices aren't available, it falls back to the
@@ -42,8 +42,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
-from timelapse_core import Sequence, smooth_brightness
-from timelapse_core.colour_temperature import kelvin_tint_from_neutral
+from harbium_timelapse import Sequence, smooth_brightness
+from harbium_timelapse.colour_temperature import kelvin_tint_from_neutral
 
 from .cameras import matrices_for
 from .sidecar import finite, read_sidecar, write_sidecar

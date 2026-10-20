@@ -1,4 +1,4 @@
-# timelapse-core — Build Scaffold
+# harbium-timelapse — Build Scaffold
 
 **Purpose:** a free, open timelapse processing library, callable from other editors. Portfolio piece and genuine contribution.
 
@@ -18,7 +18,7 @@ This library is the first-step processing core of a planned **end-to-end editor*
 
 Read this whole document before writing code.
 
-**The hard rule:** `src/timelapse_core/` never imports anything from `integrations/`, and never knows any editor exists. If a task tempts you to put RapidRAW (or Lightroom, or Resolve) logic in the core, the abstraction is wrong. Fix the abstraction.
+**The hard rule:** `src/harbium_timelapse/` never imports anything from `integrations/`, and never knows any editor exists. If a task tempts you to put RapidRAW (or Lightroom, or Resolve) logic in the core, the abstraction is wrong. Fix the abstraction.
 
 **Verify as you go.** After every change: `python -m pytest -q`. Do not batch up failures.
 
@@ -29,12 +29,12 @@ Read this whole document before writing code.
 ## 1. Structure
 
 ```
-timelapse-core/
+harbium-timelapse/
 ├── pyproject.toml              # hatchling; console script `timelapse`
 ├── README.md                   # public face. Humble voice.
 ├── LICENSE                     # MIT — [[ name ]] placeholder to fill
 ├── docs/SCAFFOLD.md            # this file
-├── src/timelapse_core/
+├── src/harbium_timelapse/
 │   ├── types.py                # THE CONTRACT — Frame, Sequence, Problem, FlickerCorrections
 │   ├── exif.py                 # read settings. ExifTool batch → exifread fallback. Read-only.
 │   ├── sequencer.py            # load, order, check. Plain-language Problems.
@@ -216,7 +216,7 @@ Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimme
 | Measurement accuracy | A pure exposure change is measured to within 0.002 stops on 16-bit files. A test enforces it. |
 | Trend preservation | A straight brightness line passes through deflicker unchanged. A test enforces it. |
 | Outliers | A single +2 stop frame moves its neighbours' targets by < 0.05 stops. A test enforces it. |
-| Core isolation | No editor-specific code or imports in `src/timelapse_core/`. |
+| Core isolation | No editor-specific code or imports in `src/harbium_timelapse/`. |
 | Errors | Plain sentences naming the file. No stack traces for expected problems in the CLI. Library warnings (e.g. exifread's per-file noise) are silenced in favour of one summarising Problem. |
 | Dependencies | numpy, Pillow, exifread required. rawpy optional. Nothing else without a reason recorded here. |
 
@@ -277,5 +277,5 @@ Leaves: 5 s exposures in wind blur foliage differently each frame: motion shimme
 - **Region of interest.** Some sequences need deflicker measured on the landscape only, ignoring a moving sky. Possible `area=` parameter, photographer-named.
 - **Iterative passes.** If an editor's exposure isn't a pure linear gain, one pass may under-correct. The integration can re-render, re-measure, and repeat; the core needs nothing new for that.
 - **Lens profile omissions.** RapidRAW only wrote `lensMaker`/`lensModel` into keyframes that were opened for editing; three keyframes lacked them, which would have switched lens correction off mid-sequence. Fixed by hand (paste lens settings). Candidate: auto-fill a setting that's identical on every keyframe that has it and missing from the rest, and say so.
-- **Package name.** `timelapse-core` is descriptive but generic on PyPI. Check availability before first release; consider something with more character.
+- **Package name.** `harbium-timelapse` is descriptive but generic on PyPI. Check availability before first release; consider something with more character.
 - LICENSE and README contain `[[ ]]` placeholders (name, GitHub username).

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from synthetic import make_folder, scene, write_jpeg
-from timelapse_core import check_sequence, format_stops, load_sequence
+from harbium_timelapse import check_sequence, format_stops, load_sequence
 
 
 def kinds(problems):

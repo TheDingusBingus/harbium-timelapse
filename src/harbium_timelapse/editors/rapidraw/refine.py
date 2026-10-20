@@ -46,10 +46,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from timelapse_core import Sequence, measure_light, smooth_brightness
-from timelapse_core.measure import fill_gaps
-from timelapse_core.deflicker import DEFAULT_WINDOW
-from timelapse_core.sequencer import _natural_key
+from harbium_timelapse import Sequence, measure_light, smooth_brightness
+from harbium_timelapse.measure import fill_gaps
+from harbium_timelapse.deflicker import DEFAULT_WINDOW
+from harbium_timelapse.sequencer import _natural_key
 
 from .sidecar import finite, get_exposure, read_sidecar, set_exposure, write_sidecar
 from .state import STATE_DIR, keep_original, ledger_kept_in_step, read_json, read_ledger, write_json

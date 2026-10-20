@@ -1,4 +1,4 @@
-"""Command line: ``timelapse check | deflicker | render | finish``.
+"""Command line: ``timelapse prepare | finish | undo | check | deflicker | render | editors``.
 
 Nothing here changes a photo or a sidecar. ``finish`` writes corrected copies
 of exported frames (and/or a video) to a new place; the export is untouched.
@@ -11,7 +11,7 @@ import csv
 import sys
 from pathlib import Path
 
-from .deflicker import DEFAULT_WINDOW, smooth_flicker
+from .deflicker import DEFAULT_WINDOW, check_window, smooth_flicker
 from .measure import measure_light
 from .sequencer import check_sequence, load_sequence
 
@@ -81,8 +81,29 @@ def _main(argv: list[str] | None = None) -> int:
     fin.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
     fin.add_argument("--csv", type=Path, help="save per-frame measurements and corrections")
 
+    prep = sub.add_parser("prepare", help="steady the white balance and deflicker, written straight into your "
+                                          "editor's edit files (detected automatically)")
+    prep.add_argument("folder", type=Path, help="the folder of RAW files you edit")
+    prep.add_argument("--editor", default="auto", help="which editor (default: detect from the files)")
+    prep.add_argument("--window", type=int, default=DEFAULT_WINDOW, help=f"frames to smooth across (default {DEFAULT_WINDOW})")
+    prep.add_argument("--strength", type=_fraction, default=1.0, help="0 to 1, how much flicker to remove (default 1)")
+    prep.add_argument("--no-white-balance", action="store_true", help="leave white balance as it is")
+    prep.add_argument("--dry-run", action="store_true", help="measure and report, write nothing")
+    prep.add_argument("--force", action="store_true", help="write even if the editor seems open or the folder has problems")
+
+    und = sub.add_parser("undo", help="take everything prepare wrote back out")
+    und.add_argument("folder", type=Path)
+    und.add_argument("--editor", default="auto")
+    und.add_argument("--force", action="store_true", help="even if the editor seems open")
+
+    sub.add_parser("editors", help="list the editors this installation can write to")
+
     args = parser.parse_args(argv)
 
+    if args.command == "editors":
+        return _editors()
+    if args.command in ("prepare", "undo"):
+        return _prepare_or_undo(args)
     if args.command == "render":
         return _render(args)
     if args.command == "finish":
@@ -211,6 +232,77 @@ def _finish(args) -> int:
         print(f"  Corrected frames: {args.out}")
     if args.video:
         print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
+    return 0
+
+
+def _editors() -> int:
+    from .editors import available
+    print("Editors this installation can write to:")
+    for name, cls in sorted(available().items()):
+        print(f"  {cls.label:12s} --editor {name}")
+    print("Any editor works with 'timelapse finish' (after exporting). Adding an editor: see docs/EDITORS.md.")
+    return 0
+
+
+def _pick_editor(folder: Path, choice: str):
+    from .editors import detect, get
+    if choice != "auto":
+        return get(choice)
+    found = detect(folder)
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        raise ValueError(
+            f"No edit files from a supported editor in {folder} (see: timelapse editors). "
+            "Open the folder in your editor and paste one edit onto every frame first. "
+            "Or skip this step: edit and export as usual, then run 'timelapse finish' on the export.")
+    raise ValueError("Edit files from more than one editor here: choose with --editor "
+                     + " or ".join(e.name for e in found) + ".")
+
+
+def _prepare_or_undo(args) -> int:
+    folder = args.folder.expanduser()
+    if not folder.is_dir():
+        raise ValueError(f"Can't find a folder at {folder}")
+    editor = _pick_editor(folder, args.editor)
+    if args.command == "prepare":
+        check_window(args.window)
+    if not getattr(args, "dry_run", False) and not args.force and editor.is_running():
+        raise ValueError(f"{editor.label} is open. Close it completely first: it can save its own copy over "
+                         "the edit files. (If you're sure it's safe, add --force.)")
+
+    def bar(word):
+        def progress(i: int, n: int) -> None:
+            print(f"\r  {word} {i}/{n}", end="", file=sys.stderr, flush=True)
+            if i == n:
+                print(file=sys.stderr)
+        return progress
+
+    print(f"{editor.label}: {folder}")
+    seq = editor.load(folder, progress=bar("Reading camera settings"))
+    if args.command == "undo":
+        n = editor.undo(seq)
+        print(f"  Took the corrections back out of {n} frames. Reopen {editor.label} to see.")
+        return 0
+    r = editor.prepare(seq, window=args.window, strength=args.strength, white_balance=not args.no_white_balance,
+                       dry_run=args.dry_run, force=args.force, progress=bar("Measuring"))
+    print(f"  {r.frames} frames")
+    for prob in r.problems:
+        print(f"  {prob}")
+    for note in r.notes:
+        print(f"  {note}")
+    if r.deflicker is not None:
+        for line in describe_changes(r.deflicker):
+            print(line)
+        if r.deflicker.unmeasured:
+            print("  " + describe_unmeasured([seq[i].name for i in r.deflicker.unmeasured]))
+        print(f"  Flicker: {r.deflicker.flicker_before:.3f} stops before, {r.deflicker.flicker_after:.3f} after.")
+    if r.dry_run:
+        print("  Dry run: nothing written.")
+        return 0
+    print(f"  Written into {r.changed} {editor.label} edit files. Undo any time: timelapse undo \"{folder}\"")
+    print(f"  Next: open the folder in {editor.label}, export every frame (JPEG is fine) into a new folder, then:")
+    print('        timelapse finish "EXPORT FOLDER" --video film.mp4')
     return 0
 
 

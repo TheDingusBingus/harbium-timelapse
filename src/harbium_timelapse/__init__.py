@@ -1,6 +1,6 @@
-"""timelapse-core: free, open timelapse processing in photographer language.
+"""harbium-timelapse: free, open timelapse processing in photographer language.
 
-    from timelapse_core import load_sequence, check_sequence, smooth_flicker
+    from harbium_timelapse import load_sequence, check_sequence, smooth_flicker
 
     seq = load_sequence("~/Pictures/sunset")
     for problem in check_sequence(seq):

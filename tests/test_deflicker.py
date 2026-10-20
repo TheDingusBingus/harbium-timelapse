@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from synthetic import make_folder
-from timelapse_core import load_sequence, smooth_brightness, smooth_flicker
-from timelapse_core.types import Frame, Sequence
+from harbium_timelapse import load_sequence, smooth_brightness, smooth_flicker
+from harbium_timelapse.types import Frame, Sequence
 
 
 def jitter(n, size, seed=42):

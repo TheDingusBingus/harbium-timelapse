@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 from synthetic import scene
-from timelapse_core import Frame, Sequence, blend_between, suggest_keyframes
-from timelapse_core.measure import _sensor_warmth, warmth_of
+from harbium_timelapse import Frame, Sequence, blend_between, suggest_keyframes
+from harbium_timelapse.measure import _sensor_warmth, warmth_of
 
 
 def frames(n):

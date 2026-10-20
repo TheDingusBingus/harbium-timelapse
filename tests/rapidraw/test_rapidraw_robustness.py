@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 from test_rapidraw import make_sequence
-import timelapse_rapidraw.deflicker as D
-from timelapse_rapidraw import apply, cli, load, plan, undo
-from timelapse_rapidraw.sidecar import get_exposure, read_sidecar, set_exposure
-from timelapse_rapidraw.state import LedgerDamaged, read_ledger
+import harbium_timelapse.editors.rapidraw.deflicker as D
+from harbium_timelapse.editors.rapidraw import apply, cli, load, plan, undo
+from harbium_timelapse.editors.rapidraw.sidecar import get_exposure, read_sidecar, set_exposure
+from harbium_timelapse.editors.rapidraw.state import LedgerDamaged, read_ledger
 
 RAW = np.linspace(0, -1, 30) + np.random.default_rng(0).normal(0, 0.05, 30)
 
