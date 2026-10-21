@@ -152,6 +152,9 @@ No code was taken from any of them; everything here was written from scratch. Th
 
 It uses [numpy](https://numpy.org) (BSD), [Pillow](https://python-pillow.org) (MIT-CMU), [exifread](https://github.com/ianare/exif-py) (BSD) and, optionally, [rawpy](https://github.com/letmaik/rawpy) (MIT; its packages include LibRaw, under LGPL or CDDL) and [tifffile](https://github.com/cgohlke/tifffile) (BSD). [ExifTool](https://exiftool.org) and [ffmpeg](https://ffmpeg.org) are run as separate programs if you have them installed.
 
+## AI Usage
+Claude has been used to assist with planning, architecting, designing and developing this tool. Could I have done it without it? Maybe. Would it have taken significantly longer than two weeks? Absolutely. Everything it produced has been reviewed and tested before going in: there are 263 automated tests, results are measured on real footage rather than assumed, and the tool never changes original photos and backs up every edit file before touching it. If you find a problem, please open an issue so we can fix it :^).
+
 ## Licence
 
 MIT, so you're free to use it, change it, and build it into other things.
