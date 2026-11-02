@@ -1029,7 +1029,11 @@ Measures: task success, time, errors, System Usability Scale (QR-12), and the mo
 
 Each phase ends with something usable and a clear test of whether it's done.
 
-### Phase 0: groundwork in the library (no GUI)
+### Phase 0: groundwork in the library (no GUI) — done, 20 October 2026
+
+Built and tested (263 tests): `progress.py` (named progress events, a cancel token checked on every progress call, so any long job can be stopped); `review.py` (the spike check with the neighbours'-midpoint rule, peak-only flags, "can't judge" for the outermost frames, and moving-camera detection by phase correlation); `report.py` (the versioned run report, relative paths, refusal of newer or foreign reports); `fix` sentences on problems; `handoff_steps()` on editor plug-ins; `timelapse review`; and in `finish`: a self-check measured in memory while writing (one fewer full read of every frame), the review and motion warning on every run, the run report, and videos written under a temporary name so a stopped run never leaves half a film. First real run: on the finished dusk film, the review independently pointed at the ND-filter turn (frame 81, 0.05 stops), the known weak spot.
+
+The plan as written before the work:
 
 Progress events and cancelling; the run report; the spike check (including "can't judge" at the ends); `fix` sentences on problems; `handoff_steps` on editor plug-ins; the moving-camera check; `timelapse review` on the command line.
 

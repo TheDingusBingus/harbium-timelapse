@@ -66,6 +66,21 @@ class Sequence:
         return self.frames[i]
 
 
+FIXES = {
+    # What to do, for problems whose message doesn't already say. Plain and short: these go on a card.
+    "too_short": "Add the rest of the frames to the folder.",
+    "mixed_cameras": "Put each camera's frames in their own folder and process them separately.",
+    "unknown_settings": "Install ExifTool so every frame's settings can be read (see the README).",
+    "missing_time": "Nothing to do if the file names are in shooting order.",
+    "gap": "Check whether frames were deleted or failed to copy. If the gap is real, nothing to do.",
+    "same_time": "If one is a duplicate, move it out of the folder.",
+    "settings_change": "Nothing to do: it's smoothed into a gentle ramp.",
+    "broken_sidecar": "Open those frames in RapidRAW and save their edits again, or run timelapse undo.",
+    "virtual_copies": "Nothing to do.",
+    "dng_inside": "Use the original RAW files, or export the frames and run timelapse finish on the export.",
+}
+
+
 @dataclass(frozen=True)
 class Problem:
     """Something worth knowing about a sequence before you process it.
@@ -78,6 +93,11 @@ class Problem:
     message: str
     frame: int | None = None
     serious: bool = False
+    fix: str = ""       # what to do about it, for an app's problem card; filled in from FIXES if empty
+
+    def __post_init__(self) -> None:
+        if not self.fix and self.kind in FIXES:
+            object.__setattr__(self, "fix", FIXES[self.kind])
 
     def __str__(self) -> str:
         prefix = "Problem" if self.serious else "Note"

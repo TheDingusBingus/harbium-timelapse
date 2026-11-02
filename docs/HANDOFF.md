@@ -279,3 +279,14 @@ Measured (benchmarks/check_encoding.py, docs/BENCHMARK.md): on real dusk footage
 S8 run on James's PC (external SSD, 229 R6 CR3s, USB-A and USB-C): ExifTool as before 0.57 to 0.59 s per file, `-fast` 0.13, four processes with `-fast` 0.079 (about 2 min 15 down to 18 s for the folder). Plain whole-file reads 0.42 s per file (about 48 MB/s) whatever the port or concurrency: a USB 2-speed bottleneck (cable or enclosure). The sandbox couldn't show the `-fast` effect because its files were cached; only the real drive could.
 
 `exif._read_with_exiftool` now runs four ExifTools at once (`EXIFTOOL_PROCESSES`; `HARBIUM_WORKERS=1` means one) with `-fast`, batches sized so all four share the work, and re-reads normally any RAW file whose fast read lacks Model, ISO, ExposureTime, DateTimeOriginal or a white-balance tag (verified identical on an 80D CR2; CR3 covered by the fallback).
+
+
+---
+
+## Addendum 8 — 20 Oct 2026: Phase 0 done
+
+New modules: `progress.py` (Progress, Cancelled, CancelToken, Tracker: wraps the existing (done, total) callbacks and checks the token on every call), `review.py` (spikes: |y_i − (y_{i−1}+y_{i+1})/2| > 0.03, peak only, EDGE = 2 frames each end not judged; colour on R−B; `shift`/`camera_motion` by phase correlation, warning above 1% of the width per frame), `report.py` (schema harbium-timelapse/report v1, `finish_report`, atomic `write`, `read` refusing newer/foreign).
+
+`finish.Meter`: incremental measurement (profiles + three SteadyChains, optional motion); `measure_channels(..., meter=)`; `apply_finish(..., meter=)` measures corrected frames in memory (self-check no longer re-reads output; identical to reading lossless output back, tested). Video encoded to `<name>.partial<ext>`, renamed on success, deleted on failure or cancel. `Problem.fix` (filled from `types.FIXES` when the message doesn't already say). `Editor.handoff_steps()` with RapidRAW and Lightroom versions. CLI: `timelapse review FOLDER [--json]`; `finish` prints findings one line per frame and writes `timelapse-report.json` (in `--out`, or `<video>.timelapse-report.json`).
+
+Real check: review of the finished dusk film (web copy) flags 5 of 229 frames, top one frame 81, the ND turn (0.05 stops darker, slightly warmer): the known "small steps at big ND turns" item.

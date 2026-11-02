@@ -57,6 +57,12 @@ class RapidRAW(Editor):
             report.changed = apply(p)
         return report
 
+    def handoff_steps(self) -> list[str]:
+        return ["Open the folder in RapidRAW: the corrections are already in place. Grade as you like.",
+                "Leave Dehaze at zero: it reacts to exposure changes and can make contrast jump.",
+                "Export every frame as JPEG into a new, empty folder next to the RAW files.",
+                "Your originals are untouched, and every edit file was backed up before it changed."]
+
     def undo(self, seq) -> int:
         n = undo(seq.folder)
         undo_white_balance(seq)

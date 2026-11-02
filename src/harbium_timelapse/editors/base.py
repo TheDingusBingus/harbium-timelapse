@@ -71,6 +71,13 @@ class Editor:
         writing into the editor's edit files. ``dry_run`` writes nothing."""
         raise NotImplementedError
 
+    def handoff_steps(self) -> list[str]:
+        """What to do in the editor after prepare, shown by the app while it waits for the export.
+        Editors override this with their own steps."""
+        return [f"Open the folder in {self.label} and grade the sequence as you like.",
+                "Export every frame as JPEG (or 16-bit TIFF) into a new, empty folder.",
+                "Your originals are untouched, and every edit file was backed up before it changed."]
+
     def undo(self, seq: Sequence) -> int:
         """Take everything ``prepare`` wrote back out. Returns frames changed."""
         raise NotImplementedError

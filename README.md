@@ -29,7 +29,7 @@ timelapse finish ~/Pictures/sunset-export --video sunset.mp4
 
 Then grade and export the way you normally would. JPEG exports are fine.
 
-`finish` looks at the exported frames and smooths out any flicker or colour shift that's left, then makes a video. It can also write corrected frames if you'd rather put them together in a video editor. Because it works on the finished frames, it doesn't matter how your editor processes the image.
+`finish` looks at the exported frames and smooths out any flicker or colour shift that's left, then makes a video. It then checks its own work: it lists any frames still worth a look (a frame that breaks away from both its neighbours, which a real change in the light never does), warns if the camera seems to have moved, and saves a small `timelapse-report.json` with every frame's measurements and corrections next to the result. It can also write corrected frames if you'd rather put them together in a video editor. Because it works on the finished frames, it doesn't matter how your editor processes the image.
 
 If `prepare` doesn't support your editor yet, you can still use the tool: grade and export as usual, then run `finish`. The `prepare` step helps most when the exposure changes a lot during a shoot (an ND filter being turned, ISO steps), because it corrects things while the RAW files still have the most room. At the moment `prepare` supports RapidRAW, and Lightroom on an experimental basis (see [docs/LIGHTROOM.md](docs/LIGHTROOM.md)). `timelapse editors` shows what's available on your install.
 
@@ -74,6 +74,7 @@ A simple app with a window and a proper installer is on the to-do list, so you w
 timelapse prepare FOLDER      white balance and deflicker, written into your editor's edits
 timelapse finish EXPORT       smooth the exported frames (add --video film.mp4 and/or --out FOLDER;
                               --codec h265 or prores for other video formats)
+timelapse review FOLDER       which frames are worth a look? A second opinion on any folder of frames
 timelapse undo FOLDER         take out everything prepare added
 timelapse check FOLDER        look over a folder before processing it
 timelapse deflicker FOLDER    work out the corrections, for any editor (add --csv file.csv to save them)

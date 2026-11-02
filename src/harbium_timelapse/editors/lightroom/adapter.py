@@ -146,6 +146,12 @@ class Lightroom(Editor):
                                 "Files, so Lightroom picks up the new exposures.")
         return report
 
+    def handoff_steps(self) -> list[str]:
+        return ["In Lightroom, select every frame, then Metadata > Read Metadata from Files.",
+                "Grade as you like. White balance is left to you; finish evens out colour afterwards.",
+                "Export every frame as JPEG into a new, empty folder.",
+                "Your .xmp files were backed up before they changed; timelapse undo puts them back."]
+
     def undo(self, seq: Sequence) -> int:
         changed = 0
         with record_kept_in_step(seq.folder, RECORD) as record:

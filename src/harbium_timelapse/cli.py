@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
+from . import report
 from .deflicker import DEFAULT_WINDOW, check_window, smooth_flicker
+from .review import EDGE, moving_camera_note
+from .review import review as review_frames
 from .measure import measure_light
 from .sequencer import check_sequence, load_sequence
 
@@ -39,6 +43,11 @@ def _fraction(text: str) -> float:
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="timelapse", description="Free timelapse processing.")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    rev = sub.add_parser("review", help="which frames are worth a look? A second opinion on any folder of frames "
+                                        "(reads only)")
+    rev.add_argument("folder", type=Path, help="frames to look over: a finished export, or any folder of frames")
+    rev.add_argument("--json", type=Path, default=None, help="also save the findings to this file")
 
     check = sub.add_parser("check", help="look over a sequence before processing")
     check.add_argument("folder", type=Path)
@@ -114,6 +123,8 @@ def _main(argv: list[str] | None = None) -> int:
         return _render(args)
     if args.command == "finish":
         return _finish(args)
+    if args.command == "review":
+        return _review(args)
 
     def reading(i: int, n: int) -> None:
         print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
@@ -184,7 +195,7 @@ def _render(args) -> int:
 
 
 def _finish(args) -> int:
-    from .finish import apply_finish, check_video_target, finished_frames, measure_channels, plan_finish
+    from .finish import Meter, apply_finish, check_video_target, finished_frames, measure_channels, plan_finish
 
     def bar(word):
         def progress(i: int, n: int) -> None:
@@ -209,12 +220,17 @@ def _finish(args) -> int:
     try:
         frames = finished_frames(args.folder.expanduser())
         print(f"{len(frames)} finished frames in {frames[0].parent}")
-        p = plan_finish(frames, window=args.window, colour=not args.brightness_only, progress=bar("Measuring"))
+        before = Meter(motion=True)
+        measured = measure_channels(frames, bar("Measuring"), meter=before)
+        p = plan_finish(frames, window=args.window, colour=not args.brightness_only, measured=measured)
     except (ValueError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
     if p.unmeasured:
         print("  " + describe_unmeasured([p.frames[i].name for i in p.unmeasured]))
+    moving = moving_camera_note(before.motion())
+    if moving:
+        print(f"  Warning: {moving}")
     print(f"  Brightness wobble: {p.brightness_before:.3f} stops now, {p.brightness_after:.3f} after")
     if not args.brightness_only:
         print(f"  Colour wobble:     {p.colour_before:.3f} now, {p.colour_after:.3f} after")
@@ -231,21 +247,85 @@ def _finish(args) -> int:
         print("  Dry run: nothing written.")
         return 0
     try:
+        after = Meter()
         written = apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width,
                                progress=bar("Writing"), fmt=args.format, codec=args.codec,
-                               dither=not args.no_dither)
+                               dither=not args.no_dither, meter=after)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
+    from .finish import LUMA, _wobble
+    check = after.series()
+    print(f"  Measured on the corrected frames: brightness {_wobble(check @ LUMA):.3f} stops, "
+          f"colour {_wobble(check[:, 0] - check[:, 2]):.3f}")
+    findings = review_frames(check, [f.name for f in frames])
+    _print_findings(findings, len(frames))
     if args.out:
-        from .finish import _wobble, LUMA
-        check = measure_channels(written, bar("Checking"))
-        print(f"  Measured on the corrected frames: brightness {_wobble(check @ LUMA):.3f} stops, "
-              f"colour {_wobble(check[:, 0] - check[:, 2]):.3f}")
         print(f"  Corrected frames: {args.out}")
     if args.video:
         print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
+    settings = {"window": args.window, "colour": not args.brightness_only, "measure": "regional-vote-1",
+                "codec": args.codec if args.video else None, "dither": not args.no_dither,
+                "fps": args.fps, "width": args.width}
+    folder = args.out if args.out else args.video.parent
+    try:
+        saved = report.write(report.finish_report(p, written if args.out else None, settings, check, findings,
+                                                  before.motion(), where=folder),
+                             folder if args.out else args.video.with_name(args.video.stem + ".timelapse-report.json"))
+        print(f"  Report: {saved}")
+    except OSError as e:
+        print(f"  (Couldn't save the run report: {e})")
     return 0
+
+
+def _print_findings(findings, n: int) -> None:
+    if not findings:
+        print("  Nothing stands out: no frame breaks away from its neighbours.")
+        return
+    by_frame: dict[str, list[str]] = {}
+    for f in findings:                                  # biggest first; one line per frame
+        by_frame.setdefault(f.name, []).append(f.note)
+    print(f"  Worth a look ({len(by_frame)} frame{'s' if len(by_frame) != 1 else ''}):")
+    for name, notes in list(by_frame.items())[:10]:
+        print(f"    {name}: {'; '.join(notes)}")
+    if len(by_frame) > 10:
+        print(f"    and {len(by_frame) - 10} more")
+    print(f"  (The first and last {min(EDGE, n)} frames can't be judged: they have neighbours on one side only.)")
+
+
+def _review(args) -> int:
+    from .finish import LUMA, Meter, _wobble, finished_frames, measure_channels
+    try:
+        frames = finished_frames(args.folder.expanduser())
+    except (ValueError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"{len(frames)} frames in {frames[0].parent}")
+    meter = Meter(motion=True)
+    try:
+        measured = measure_channels(frames, _bar("Measuring"), meter=meter)
+    except (ValueError, OSError) as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    print(f"  Brightness wobble {_wobble(measured @ LUMA):.3f} stops, colour {_wobble(measured[:, 0] - measured[:, 2]):.3f}")
+    moving = moving_camera_note(meter.motion())
+    if moving:
+        print(f"  Warning: {moving}")
+    findings = review_frames(measured, [f.name for f in frames])
+    _print_findings(findings, len(frames))
+    if args.json:
+        args.json.write_text(json.dumps([{"frame": f.frame, "name": f.name, "kind": f.kind, "size": round(f.size, 4),
+                                          "note": f.note} for f in findings], indent=1), encoding="utf-8")
+        print(f"  Saved {args.json}")
+    return 0
+
+
+def _bar(word):
+    def progress(i: int, n: int) -> None:
+        print(f"\r  {word} {i}/{n}", end="", file=sys.stderr, flush=True)
+        if i == n:
+            print(file=sys.stderr)
+    return progress
 
 
 def _editors() -> int:
