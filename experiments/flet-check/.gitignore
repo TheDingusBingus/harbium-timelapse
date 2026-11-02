@@ -1,0 +1,3 @@
+# programs bundled into the test app: never committed
+src/assets/bin/*
+!src/assets/bin/README.md
