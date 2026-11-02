@@ -71,3 +71,15 @@ def test_end_to_end_on_files(tmp_path):
     assert fix.flicker_before > 0.05
     assert np.std(np.diff(corrected)) < np.std(np.diff(fix.brightness)) / 5
     assert set(fix.by_filename()) == {f"IMG_{i:04d}.jpg" for i in range(1, 81)}
+
+
+def test_the_fast_smoother_gives_exactly_the_original_answers():
+    """The all-at-once smoother must match the frame-by-frame original, including
+    untrusted frames, the ends, and windows as wide as the sequence."""
+    from harbium_timelapse.deflicker import _local_lines, _local_lines_one_at_a_time
+    rng = np.random.default_rng(0)
+    for n, w in [(5, 3), (229, 25), (229, 50), (2000, 61), (300, 300)]:
+        y = np.cumsum(rng.normal(0, 0.05, n))
+        trust = rng.uniform(0, 1, n)
+        trust[rng.random(n) < 0.1] = 0
+        assert np.allclose(_local_lines(y, w, trust), _local_lines_one_at_a_time(y, w, trust), atol=1e-12)
