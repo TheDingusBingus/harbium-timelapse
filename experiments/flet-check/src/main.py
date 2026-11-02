@@ -18,6 +18,7 @@ import os
 import platform
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -71,6 +72,49 @@ def memory_gb() -> float | None:
     return s.total / 1e9 if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s)) else None
 
 
+def draw_timeline(measured: np.ndarray, curve: np.ndarray, w: int = 900, h: int = 260) -> np.ndarray:
+    """The timeline drawn as an image: measured light as a fine line, the smoothing curve heavier on top."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), (255, 255, 255))
+    d = ImageDraw.Draw(im)
+    lo, hi, pad = -3.2, 0.8, 8
+    n = len(measured)
+    def xy(values):
+        return [(pad + i * (w - 2 * pad) / (n - 1), pad + (hi - v) / (hi - lo) * (h - 2 * pad))
+                for i, v in enumerate(values)]
+    for v in range(-3, 1):
+        y = pad + (hi - v) / (hi - lo) * (h - 2 * pad)
+        d.line([(pad, y), (w - pad, y)], fill=(225, 225, 225))
+    d.line(xy(measured), fill=(150, 160, 170), width=1)
+    d.line(xy(curve), fill=(0, 0, 0), width=3)
+    return np.asarray(im)
+
+
+def preview_frame(path: str) -> np.ndarray:
+    """A small display copy of a RAW file (sRGB, 8-bit), as the real app's preview cache would hold."""
+    from harbium_timelapse.finish import _linear_to_srgb
+    from harbium_timelapse.measure import _load_for_measuring
+    img, _ = _load_for_measuring((Path(path), "careful"))
+    img = img / max(np.percentile(img, 99.5), 1e-6) * 0.9          # a quick, steady exposure for viewing
+    return np.round(_linear_to_srgb(np.clip(img, 0, 1)) * 255).astype(np.uint8)
+
+
+def add_markers(frames: list[np.ndarray]) -> list[np.ndarray]:
+    """A bar that crosses the frame steadily and a frame counter: stutter shows up as the bar jumping."""
+    from PIL import Image, ImageDraw
+    out = []
+    for i, f in enumerate(frames):
+        im = Image.fromarray(np.ascontiguousarray(f[..., :3]))
+        d = ImageDraw.Draw(im)
+        w, h = im.size
+        x = int((i % 96) / 96 * w)
+        d.rectangle([x, 0, x + max(3, w // 160), h], fill=(255, 64, 160))
+        d.rectangle([0, 0, 90, 22], fill=(0, 0, 0))
+        d.text((6, 4), f"frame {i + 1}", fill=(255, 255, 255))
+        out.append(np.asarray(im))
+    return out
+
+
 def synthetic_frames(n: int, w: int = 960, h: int = 640) -> list[np.ndarray]:
     """Dusk-like test frames: a sky gradient with noise and a light that falls."""
     rng = np.random.default_rng(1)
@@ -122,7 +166,8 @@ async def main(page: ft.Page) -> None:
         log("== Machine ==")
         log(f"{platform.platform()}, {os.cpu_count()} logical cores, "
             f"{(memory_gb() or 0):.1f} GB memory, Python {platform.python_version()}")
-        log(f"Packaged app: {'yes' if 'FLET_ASSETS_DIR' in os.environ else 'no (running from source)'}")
+        packaged = not Path(sys.executable).stem.lower().startswith("python")
+        log(f"Packaged app: {'yes' if packaged else 'no (running from source)'} ({Path(sys.executable).name})")
         log(f"flet {ft.__version__ if hasattr(ft, '__version__') else '?'}, numpy {np.__version__}, "
             f"Pillow {PIL.__version__}, rawpy {rawpy.__version__} (LibRaw {rawpy.libraw_version}), "
             f"harbium-timelapse {getattr(harbium_timelapse, '__version__', 'installed')}")
@@ -245,7 +290,7 @@ async def main(page: ft.Page) -> None:
     async def s4(_):
         import flet_charts as fc
         from harbium_timelapse.deflicker import smooth_brightness
-        busy("S4: drawing a 2,000-frame timeline; drag the slider...")
+        busy("S4: drawing a 2,000-frame timeline; drag the slider back and forth...")
         log("== S4 timeline chart ==")
         n = 2000
         rng = np.random.default_rng(3)
@@ -257,55 +302,90 @@ async def main(page: ft.Page) -> None:
             return fc.LineChartData(points=pts, color=color, stroke_width=width)
         t = time.perf_counter()
         curve = await asyncio.to_thread(smooth_brightness, measured, 25)
-        replan_ms = (time.perf_counter() - t) * 1000
-        chart = fc.LineChart(data_series=[series(measured, ft.Colors.GREY, 1), series(curve, ft.Colors.WHITE, 2)],
-                             height=260, expand=True, animation=False)
-        timings = []
+        first_ms = (time.perf_counter() - t) * 1000
+        chart = fc.LineChart(data_series=[series(measured, ft.Colors.BLUE_GREY_300, 1),
+                                          series(curve, ft.Colors.BLACK, 2)],
+                             min_y=-3.2, max_y=0.8, animation=False)
+        drawn = ft.RawImage(width=900, height=260)
+        plans, draws, waits, own = [], [], [], []
+        latest = {"value": None, "moved_at": 0.0, "running": False}
+
+        async def replan_until_caught_up():
+            # Only ever calculate the newest slider position; moves made meanwhile are skipped, not queued.
+            latest["running"] = True
+            while latest["value"] is not None:
+                value, moved_at = latest["value"], latest["moved_at"]
+                latest["value"] = None
+                t0 = time.perf_counter()
+                c = await asyncio.to_thread(smooth_brightness, measured, value)
+                t1 = time.perf_counter()
+                chart.data_series = [series(measured, ft.Colors.BLUE_GREY_300, 1), series(c, ft.Colors.BLACK, 2)]
+                chart.update()
+                t2 = time.perf_counter()
+                await drawn.render(await asyncio.to_thread(draw_timeline, measured, c))
+                own.append((time.perf_counter() - t2) * 1000)
+                plans.append((t1 - t0) * 1000)
+                draws.append((t2 - t1) * 1000)
+                waits.append((t2 - moved_at) * 1000)
+                busy(f"S4: smoothness {value}: re-plan {plans[-1]:.0f} ms, extension chart {draws[-1]:.0f} ms, "
+                     f"own drawing on screen {own[-1]:.0f} ms, slider to curve {waits[-1]:.0f} ms")
+            latest["running"] = False
 
         async def changed(e):
-            t0 = time.perf_counter()
-            c = await asyncio.to_thread(smooth_brightness, measured, int(e.control.value))
-            t1 = time.perf_counter()
-            chart.data_series = [series(measured, ft.Colors.GREY, 1), series(c, ft.Colors.WHITE, 2)]
-            chart.update()
-            timings.append(((t1 - t0) * 1000, (time.perf_counter() - t1) * 1000))
-            busy(f"S4: re-plan {timings[-1][0]:.0f} ms, chart sent in {timings[-1][1]:.0f} ms")
+            latest["value"], latest["moved_at"] = int(e.control.value), time.perf_counter()
+            if not latest["running"]:
+                page.run_task(replan_until_caught_up)
 
         async def done(_):
-            if timings:
-                plan = [a for a, _ in timings]
-                draw = [b for _, b in timings]
-                log(f"Smoothing 2,000 frames: {replan_ms:.0f} ms first time; while dragging: re-plan median "
-                    f"{statistics.median(plan):.0f} ms, chart update median {statistics.median(draw):.0f} ms "
-                    f"({len(timings)} changes)")
+            if plans:
+                log(f"Smoothing 2,000 frames: {first_ms:.0f} ms first time; while dragging ({len(plans)} redraws): "
+                    f"re-plan median {statistics.median(plans):.0f} ms, chart update median "
+                    f"{statistics.median(draws):.0f} ms, our own drawn timeline on screen median "
+                    f"{statistics.median(own):.0f} ms, slider move to new curve median "
+                    f"{statistics.median(waits):.0f} ms (worst {max(waits):.0f} ms)")
+            log("Did the extension chart (top box) show lines, or stay grey? ____")
             log("Did the curve follow the slider smoothly? Note it here: ____")
             page.remove(box)
             busy("")
-        slider = ft.Slider(min=7, max=61, divisions=27, value=25, label="{value}", on_change=changed)
-        box = ft.Column([chart, ft.Row([ft.Text("Smoothness"), slider], expand=True),
-                         ft.Button("Done with S4", on_click=done)])
+        slider = ft.Slider(min=7, max=61, divisions=27, value=25, label="{value}", on_change=changed, width=400)
+        box = ft.Column([
+            ft.Text("Chart extension (expected to show lines only in the built app):"),
+            ft.Container(chart, height=300, width=900, bgcolor=ft.Colors.WHITE, padding=10,
+                         border=ft.Border.all(1, ft.Colors.GREY_400)),
+            ft.Text("Drawn by the app itself (works everywhere):"),
+            drawn,
+            ft.Row([ft.Text("Smoothness"), slider]),
+            ft.Button("Done with S4", on_click=done)])
         page.add(box)
+        await drawn.render(await asyncio.to_thread(draw_timeline, measured, curve))
 
     # -- S5: playback
     async def s5(_):
-        busy("S5: playing 229 frames at 24 frames a second...")
+        busy("S5: preparing frames...")
         log("== S5 playback ==")
-        frames = await asyncio.to_thread(synthetic_frames, SMALL or 229)
+        if state["folder"]:
+            from harbium_timelapse.parallel import ordered_map
+            files = [str(p) for p in sorted(Path(state["folder"]).iterdir()) if p.suffix.lower() in RAW]
+            frames = await asyncio.to_thread(lambda: list(ordered_map(preview_frame, files)))
+            what = f"your sequence ({len(frames)} frames)"
+        else:
+            frames = await asyncio.to_thread(synthetic_frames, SMALL or 229)
+            what = f"test frames ({len(frames)}; run S1 first to play your own)"
+        frames = await asyncio.to_thread(add_markers, frames)
+        busy(f"S5: playing {what} at 24 frames a second...")
         interval = 1 / 24
         late = 0
         start = time.perf_counter()
         for i, f in enumerate(frames):
             await raw.render(f)
-            due = start + (i + 1) * interval
-            wait = due - time.perf_counter()
+            wait = start + (i + 1) * interval - time.perf_counter()
             if wait > 0:
                 await asyncio.sleep(wait)
             else:
                 late += 1
         took = time.perf_counter() - start
-        log(f"Played {len(frames)} frames in {took:.1f} s ({len(frames) / took:.1f} frames a second; target 24), "
-            f"{late} frames late")
-        log("Did playback look smooth? Note it here: ____")
+        log(f"Played {what} in {took:.1f} s ({len(frames) / took:.1f} frames a second; target 24), {late} late")
+        log("Did playback look smooth? Did the marker glide or jump? Note it here: ____")
         busy("")
 
     # -- S6: keyboard and network
