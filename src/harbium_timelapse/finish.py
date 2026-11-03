@@ -76,6 +76,15 @@ class FinishPlan:
     measured: np.ndarray   # frames × (red, green, blue); NaN where a frame couldn't be measured
     target: np.ndarray     # the smoothed journey, same shape
 
+    def trimmed(self, first: int | None = None, last: int | None = None) -> "FinishPlan":
+        """Frames ``first`` to ``last`` (1-based, inclusive) of this plan. The smoothing was done on the whole
+        sequence, so a trimmed video keeps the same smooth curve, with no new edges at the cut."""
+        n = len(self.frames)
+        a, b = (first or 1) - 1, last or n
+        if not 0 <= a < b <= n:
+            raise ValueError(f"The range must be within frames 1 to {n}, with the first before the last.")
+        return FinishPlan(tuple(self.frames[a:b]), self.measured[a:b], self.target[a:b])
+
     @property
     def unmeasured(self) -> tuple[int, ...]:
         """Frames that couldn't be measured (black, fully blown): copied unchanged."""
@@ -190,6 +199,84 @@ CODECS = {
 }
 
 
+PRORES_PROFILES = {"proxy": 0, "lt": 1, "standard": 2, "hq": 3, "4444": 4}
+CHROMA = ("420", "422", "444")
+
+
+@dataclass(frozen=True)
+class VideoOptions:
+    """Everything about how the video is encoded (resolution and frame rate are separate).
+
+    codec: "h264", "h265" or "prores". quality: CRF for H.264/H.265 (lower is
+    better; None = the codec's default). bit_depth: 8 or 10 (H.264 is 8-bit;
+    H.265 defaults to 10; ProRes is 10). chroma: "420", "422" or "444" colour
+    detail (ProRes takes it from its profile). prores_profile: proxy, lt,
+    standard, hq or 4444."""
+    codec: str = "h264"
+    quality: int | None = None
+    bit_depth: int | None = None
+    chroma: str | None = None
+    prores_profile: str = "hq"
+
+    @property
+    def depth(self) -> int:
+        if self.codec == "prores":
+            return 10
+        return self.bit_depth or (10 if self.codec == "h265" else 8)
+
+    @property
+    def subsampling(self) -> str:
+        if self.codec == "prores":
+            return "444" if self.prores_profile == "4444" else "422"
+        return self.chroma or "420"
+
+    @property
+    def pix_fmt(self) -> str:
+        base = {"420": "yuv420p", "422": "yuv422p", "444": "yuv444p"}[self.subsampling]
+        return base + ("10le" if self.depth == 10 else "")
+
+    @property
+    def ten_bit(self) -> bool:
+        return self.depth == 10
+
+    def check(self) -> None:
+        """Refuse combinations that can't be made, saying why, rather than quietly changing them."""
+        if self.codec not in CODECS:
+            raise ValueError(f"Unknown video format {self.codec!r}. Choose from: {', '.join(CODECS)}.")
+        if self.chroma is not None and self.chroma not in CHROMA:
+            raise ValueError("Colour detail must be 420, 422 or 444.")
+        if self.codec == "h264" and self.bit_depth not in (None, 8):
+            raise ValueError("H.264 is made in 8-bit here. For 10-bit, choose H.265 or ProRes.")
+        if self.codec == "h265" and self.bit_depth not in (None, 8, 10):
+            raise ValueError("H.265 can be 8-bit or 10-bit.")
+        if self.codec == "prores":
+            if self.prores_profile not in PRORES_PROFILES:
+                raise ValueError(f"ProRes profile must be one of: {', '.join(PRORES_PROFILES)}.")
+            if self.chroma is not None and self.chroma != self.subsampling:
+                raise ValueError(f"ProRes {self.prores_profile} is always {self.subsampling[0]}:"
+                                 f"{self.subsampling[1]}:{self.subsampling[2]}. For 4:4:4 choose the 4444 profile.")
+            if self.bit_depth not in (None, 10):
+                raise ValueError("ProRes is always 10-bit.")
+        if self.quality is not None and self.codec != "prores" and not 0 <= self.quality <= 51:
+            raise ValueError("Quality (CRF) must be between 0 and 51; lower means better and bigger.")
+
+    def notes(self, width: int | None = None) -> list[str]:
+        """Plain compatibility notes for this choice, for showing before anything is written."""
+        out = []
+        if self.codec == "h264" and self.subsampling != "420":
+            out.append("H.264 with 4:2:2 or 4:4:4 colour plays in editing software, but many players, "
+                       "phones and TVs can't play it.")
+        if self.codec == "h264" and width and width > 4096:
+            out.append("H.264 wider than 4K won't play on some phones and TVs.")
+        if self.codec == "h265":
+            out.append("Some Windows PCs need Microsoft's HEVC extension to play H.265.")
+            if self.subsampling != "420":
+                out.append("H.265 with 4:2:2 or 4:4:4 colour is for editing; most players can't play it.")
+        if self.codec == "prores":
+            out.append("ProRes files are large: made for video editors, not for sharing.")
+        return out
+
+
 def check_video_target(video: Path | str, codec: str = "h264") -> None:
     """Refuse a video that can't be made, before any slow work starts."""
     if codec not in CODECS:
@@ -227,7 +314,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                  fps: float = 24, width: int | None = None, quality: int | None = None,
                  progress: Progress | None = None, fmt: str | None = None,
                  codec: str = "h264", dither: bool = True, meter: "Meter | None" = None,
-                 finalising: Callable[[], None] | None = None, timings: dict | None = None) -> list[Path]:
+                 finalising: Callable[[], None] | None = None, timings: dict | None = None,
+                 options: "VideoOptions | None" = None, jpeg_quality: int = JPEG_QUALITY) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -256,6 +344,11 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
         raise ValueError('The output format must be "jpg", "png" or "tif".')
     if out is None and video is None:
         raise ValueError("Say where to put the result: a folder for frames, a video file, or both.")
+    if options is not None:
+        options.check()
+        codec = options.codec
+    if not 1 <= jpeg_quality <= 100:
+        raise ValueError("JPEG quality must be between 1 and 100.")
     if fps <= 0:
         raise ValueError(f"Frames per second must be above 0 (got {fps}).")
     if width is not None and width < 16:
@@ -289,7 +382,7 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
         partial = video.with_name(video.stem + ".partial" + video.suffix)
     finished = False
     try:
-        ten_bit = video is not None and CODECS[codec][3]
+        ten_bit = video is not None and (options.ten_bit if options is not None else CODECS[codec][3])
         clock = time.perf_counter
         spent = timings if timings is not None else {}
         for k in ("read", "correct", "save", "check", "encode", "finalise", "read_busy"):
@@ -324,7 +417,7 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 to_8bit = targets[i].suffix.lower() in (".jpg", ".jpeg", ".png")
                 fixed = correct(img, gains, out_dtype=np.uint8 if to_8bit else None, dither=dither, seed=i)
                 t1 = clock()
-                _write(targets[i], fixed, info)
+                _write(targets[i], fixed, info, jpeg_quality)
                 spent["correct"] += t1 - t0
                 spent["save"] += clock() - t1
             if video is not None:
@@ -337,7 +430,7 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                     frame = correct(img, gains, out_dtype=np.uint8, dither=dither, seed=i)
                 t1 = clock()
                 if encoder is None:
-                    encoder = _Encoder(partial, frame, fps, width, quality, codec)
+                    encoder = _Encoder(partial, frame, fps, width, quality, codec, options)
                 encoder.write(frame)
                 spent["correct"] += t1 - t0
                 spent["encode"] += clock() - t1
@@ -482,9 +575,21 @@ def _small_linear(img: np.ndarray) -> np.ndarray:
     step = max(1, max(img.shape[:2]) // LONG_EDGE)
     h, w = (img.shape[0] // step) * step, (img.shape[1] // step) * step
     out = np.empty((h // step, w // step, 3))
-    for c in range(3):                     # a channel at a time: smaller and far kinder to memory than all at once
-        rows = lut[img[:h, :w, c]].reshape(h, w // step, step).sum(axis=2, dtype=np.float64)
-        out[..., c] = rows.reshape(h // step, step, w // step).sum(axis=1) / (step * step)
+
+    def band(r0: int, r1: int) -> None:    # block-rows r0..r1, a channel at a time: small and memory-friendly
+        for c in range(3):
+            rows = np.take(lut, img[r0 * step:r1 * step, :w, c]).reshape((r1 - r0) * step, w // step, step)
+            rows = rows.sum(axis=2, dtype=np.float64)
+            out[r0:r1, :, c] = rows.reshape(r1 - r0, step, w // step).sum(axis=1) / (step * step)
+    n = h // step
+    per = max(1, -(-n // CORRECT_THREADS))
+    bands = [(r, min(n, r + per)) for r in range(0, n, per)]
+    if len(bands) > 1 and CORRECT_THREADS > 1:
+        with ThreadPoolExecutor(CORRECT_THREADS) as pool:
+            list(pool.map(lambda b: band(*b), bands))
+    else:
+        for b in bands:
+            band(*b)
     return out
 
 
@@ -518,7 +623,7 @@ def _read(path: Path, with_info: bool = False):
     return (arr, info) if with_info else arr
 
 
-def _write(path: Path, img: np.ndarray, info: dict) -> None:
+def _write(path: Path, img: np.ndarray, info: dict, jpeg_quality: int = JPEG_QUALITY) -> None:
     suffix = path.suffix.lower()
     if suffix in (".tif", ".tiff") and (img.dtype == np.uint16 or info.get("tiff")):
         import tifffile
@@ -528,7 +633,7 @@ def _write(path: Path, img: np.ndarray, info: dict) -> None:
         img = np.round(img / 257.0).astype(np.uint8)
     extra = {k: v for k, v in info.items() if k in ("exif", "icc_profile", "dpi")}
     if suffix in (".jpg", ".jpeg"):
-        Image.fromarray(img).save(path, quality=JPEG_QUALITY, subsampling=0, **extra)
+        Image.fromarray(img).save(path, quality=jpeg_quality, subsampling=0, **extra)
     else:
         Image.fromarray(img).save(path, **extra)
 
@@ -537,25 +642,32 @@ class _Encoder:
     """Feeds corrected frames straight to ffmpeg: no files in between."""
 
     def __init__(self, target: Path, first: np.ndarray, fps: float, width: int | None,
-                 quality: int | None, codec: str = "h264"):
+                 quality: int | None, codec: str = "h264", options: "VideoOptions | None" = None):
         if not ffmpeg_available():
             raise RuntimeError("Making a video needs ffmpeg. On Windows: winget install Gyan.FFmpeg "
                                "(then open a new terminal). Elsewhere: ffmpeg.org.")
         self.shape, self.dtype = first.shape, first.dtype
         h, w = first.shape[:2]
         scale = f"scale={width // 2 * 2}:-2" if width else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        opts = options or VideoOptions(codec=codec, quality=quality)
         pix = "rgb48le" if first.dtype == np.uint16 else "rgb24"
-        crf = str(quality if quality is not None else CODECS[codec][4])
+        crf = str(opts.quality if opts.quality is not None else CODECS[opts.codec][4])
         video_args = {
-            "h264": ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", crf],
-            "h265": ["-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "medium", "-crf", crf,
+            "h264": ["-c:v", "libx264", "-preset", "slow", "-crf", crf],
+            "h265": ["-c:v", "libx265", "-preset", "medium", "-crf", crf,
                      "-x265-params", "log-level=error", "-tag:v", "hvc1"],
-            "prores": ["-pix_fmt", "yuv422p10le", "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0"],
-        }[codec]
+            "prores": ["-c:v", "prores_ks", "-profile:v", str(PRORES_PROFILES[opts.prores_profile]),
+                       "-vendor", "apl0"],
+        }[opts.codec]
+        # Convert to video colour with the HD formula (BT.709) and say so in the file. ffmpeg's default is
+        # the standard-definition formula, unlabelled, which players showing HD or 4K decode as BT.709:
+        # colours came out slightly shifted, greens and reds most.
+        convert = f"{scale}:out_color_matrix=bt709:out_range=tv,format={opts.pix_fmt}"
+        tags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
         self.process = subprocess.Popen(
             [ffmpeg(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,
-             "-s", f"{w}x{h}", "-framerate", str(fps), "-i", "-",
-             "-vf", scale, *video_args, "-movflags", "+faststart", str(target)],
+             "-s", f"{w}x{h}", "-framerate", str(fps), "-color_range", "pc", "-i", "-",
+             "-vf", convert, *video_args, *tags, "-movflags", "+faststart", str(target)],
             stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def write(self, frame: np.ndarray) -> None:

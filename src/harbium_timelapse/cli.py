@@ -89,6 +89,16 @@ def _main(argv: list[str] | None = None) -> int:
     fin.add_argument("--codec", default="h264", choices=["h264", "h265", "prores"],
                      help="video format: h264 (default, plays anywhere), h265 (10-bit, smaller, smoother "
                           "gradients) or prores (ProRes 422 HQ, 10-bit, for editing; needs a .mov file)")
+    fin.add_argument("--quality", type=int, default=None,
+                     help="video quality as CRF for h264/h265: lower is better and bigger (defaults 16 and 18)")
+    fin.add_argument("--bit-depth", type=int, choices=[8, 10], default=None, help="h265 only: 8 or 10 (default 10)")
+    fin.add_argument("--chroma", choices=["420", "422", "444"], default=None,
+                     help="colour detail for h264/h265 (default 420; 422 and 444 are for editing)")
+    fin.add_argument("--prores-profile", choices=["proxy", "lt", "standard", "hq", "4444"], default="hq",
+                     help="ProRes profile (default hq; 4444 gives 4:4:4 colour)")
+    fin.add_argument("--first", type=int, default=None, help="first frame to write (1-based; default the first)")
+    fin.add_argument("--last", type=int, default=None, help="last frame to write (1-based; default the last)")
+    fin.add_argument("--jpeg-quality", type=int, default=95, help="quality of corrected JPEG frames, 1-100 (default 95)")
     fin.add_argument("--no-dither", action="store_true",
                      help="round corrected 8-bit frames plainly instead of dithering (dither hides banding)")
     fin.add_argument("--brightness-only", action="store_true", help="leave colour exactly as exported")
@@ -194,7 +204,7 @@ def _render(args) -> int:
 
 
 def _finish(args) -> int:
-    from .finish import check_video_target, finished_frames
+    from .finish import VideoOptions, check_video_target, finished_frames
 
     if args.fps <= 0 or (args.width is not None and args.width < 16) or args.window < 3:
         print("Check the numbers: --fps above 0, --width at least 16, --window at least 3.", file=sys.stderr)
@@ -241,8 +251,12 @@ def _finish(args) -> int:
         print("  Dry run: nothing written.")
         return 0
     try:
+        options = VideoOptions(codec=args.codec, quality=args.quality, bit_depth=args.bit_depth,
+                               chroma=args.chroma, prores_profile=args.prores_profile)
+        options.check()
         done = session.write_export(planned, out=args.out, video=args.video, fps=args.fps, width=args.width,
-                                    codec=args.codec, dither=not args.no_dither, fmt=args.format,
+                                    codec=args.codec, dither=not args.no_dither, fmt=args.format, options=options,
+                                    jpeg_quality=args.jpeg_quality, first=args.first, last=args.last,
                                     settings={"window": args.window, "colour": not args.brightness_only},
                                     tracker=tracker)
     except (ValueError, RuntimeError, OSError) as e:

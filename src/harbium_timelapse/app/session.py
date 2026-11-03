@@ -17,8 +17,8 @@ from .. import measure_cache
 from .. import report as run_report
 from ..editors import detect
 from ..editors.base import Editor, PrepareReport
-from ..finish import (LUMA, FinishPlan, Meter, _wobble, apply_finish, check_video_target, finished_frames,
-                      measure_channels, plan_finish)
+from ..finish import (JPEG_QUALITY, LUMA, FinishPlan, Meter, VideoOptions, _wobble, apply_finish,
+                      check_video_target, finished_frames, measure_channels, plan_finish)
 from ..measure import measure_brightness
 from ..progress import Tracker
 from ..review import Finding, moving_camera_note
@@ -211,13 +211,22 @@ def plan_export(folder: Path, window: int = 25, colour: bool = True, tracker: Tr
 
 def write_export(planned: Planned, out: Path | None = None, video: Path | None = None, fps: float = 24,
                  width: int | None = None, codec: str = "h264", dither: bool = True, fmt: str | None = None,
-                 settings: dict | None = None, tracker: Tracker | None = None) -> Finished:
-    """Write corrected frames and/or the video, check them, review them, and save the run report."""
+                 settings: dict | None = None, tracker: Tracker | None = None, options: VideoOptions | None = None,
+                 jpeg_quality: int = JPEG_QUALITY, first: int | None = None, last: int | None = None) -> Finished:
+    """Write corrected frames and/or the video, check them, review them, and save the run report.
+    ``first``/``last`` (1-based) trim what's written; the smoothing still comes from the whole sequence."""
+    if options is not None:
+        options.check()
+        codec = options.codec
     if video is not None:
         check_video_target(video, codec)
+    if first is not None or last is not None:
+        planned = Planned(list(planned.plan.trimmed(first, last).frames), planned.plan.trimmed(first, last),
+                          planned.motion)
     after = Meter()
     timings: dict = {}
-    written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width,
+    written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width, options=options,
+                           jpeg_quality=jpeg_quality,
                            progress=tracker.stage("Writing") if tracker else None, fmt=fmt, codec=codec,
                            dither=dither, meter=after,
                            finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None,
@@ -226,6 +235,9 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")
     settings = {"measure": "regional-vote-1", "codec": codec if video else None, "dither": dither,
+                "video": None if not video or options is None else
+                {"pix_fmt": options.pix_fmt, "quality": options.quality, "prores_profile": options.prores_profile},
+                "frames": [first or 1, last or None] if (first or last) else None,
                 "fps": fps, "width": width, **(settings or {}),
                 "seconds": {k: round(v, 2) for k, v in timings.items() if k != "bytes"}, "bytes_read": timings.get("bytes", 0)}
     try:
