@@ -17,7 +17,7 @@ import flet as ft
 
 from ...app.session import ExportStatus
 from ..models import AppModel, Series, render_timeline
-from ..models.app import PRESETS
+from ..models.export import BUILT_IN, FRAME_RATES, RESOLUTIONS
 from ..models.timeline import Theme
 from ..theme import BODY, DARK, DISPLAY, FONTS, LIGHT, MONO
 
@@ -261,63 +261,175 @@ class GradeScreen(Screen):
 
 
 class FinishScreen(Screen):
+    """The export window: presets up front, every option one click away, checks before anything is written."""
+
     def build(self):
-        ui, m = self.ui, self.m
-        self.export_text = ui.text("", mono=True, size=14)
-        self.video_text = ft.TextField(value="", text_size=13, text_style=ft.TextStyle(font_family=MONO),
-                                       dense=True, width=520, border_color=ui.t["line"],
-                                       on_blur=self.typed_video, on_submit=self.typed_video)
-        self.detail = ui.text("", dim=True, size=14)
-        self.presets = ft.SegmentedButton(
-            segments=[ft.Segment(value=k, label=ft.Text(v["label"])) for k, v in PRESETS.items()],
-            selected=[m.preset], allow_multiple_selection=False,
-            on_change=lambda e: m.choose_preset(list(e.control.selected)[0]))
-        self.fps = ft.Dropdown(options=[ft.DropdownOption(key=f, text=f) for f in FPS_CHOICES],
-                               value=str(m.fps), width=140,
-                               on_select=lambda e: m.set_fps(float(e.control.value)))
-        self.go_btn = ui.primary("Finish video", lambda e: m.start_finish())
+        self.box = ft.Column(spacing=14, width=920)
+        self.advanced_open = getattr(self, "advanced_open", False)
+        self._version = None
+        self.go_btn = None
         self.refresh()
-        def row(label, *controls):
-            return ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150), *controls],
-                          vertical_alignment=ft.CrossAxisAlignment.CENTER)
-        return ft.Column([
-            ui.title("Finish"),
-            ui.text("Smooths whatever flicker is left in your export and makes the video.", dim=True, size=14),
-            row("Exported frames", self.export_text, ui.secondary("Change", self.choose_export)),
-            row("Video", self.presets), row("", self.detail),
-            row("Frame rate", self.fps),
-            row("Save to", self.video_text, ui.secondary("Change", self.choose_video)),
-            row("", ft.Checkbox(label="Also save the corrected frames as files", value=m.also_frames,
-                                on_change=lambda e: m.set_also_frames(e.control.value))),
-            ft.Row([self.go_btn], alignment=ft.MainAxisAlignment.END),
-        ], spacing=14, width=900)
+        return self.box
 
     def refresh(self):
         m = self.m
-        self.export_text.value = m.project.export or "Not chosen yet"
-        self.video_text.value = str(m.video_path) if m.video_path else ""
-        self.detail.value = PRESETS[m.preset]["detail"]
-        self.go_btn.disabled = not m.can_finish
+        if self._version != m.out_version:                   # settings changed: lay the window out again
+            self._version = m.out_version
+            self.box.controls = self._controls()
+        if self.go_btn is not None:
+            self.go_btn.disabled = not m.can_finish
 
-    def typed_video(self, e):
-        text = (e.control.value or "").strip().strip('"')
+    # -- layout ----------------------------------------------------------------------------------
+    def _controls(self) -> list:
+        ui, m, s = self.ui, self.m, self.m.out
+        check = m.export_check
+
+        def row(label, *controls):
+            return ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150), *controls],
+                          vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True)
+
+        def dropdown(value, options, on_pick, width=200):
+            return ft.Dropdown(options=[ft.DropdownOption(key=str(k), text=t) for k, t in options], value=str(value),
+                               width=width, dense=True, on_select=lambda e: on_pick(e.control.value))
+
+        def path_field(value, on_done, width=520):
+            return ft.TextField(value=value or "", text_size=13, text_style=ft.TextStyle(font_family=MONO),
+                                dense=True, width=width, border_color=ui.t["line"],
+                                on_blur=lambda e: on_done(e.control.value), on_submit=lambda e: on_done(e.control.value))
+
+        presets = []
+        for key, label in m.presets:
+            chosen = key == s.preset
+            presets.append((ui.primary if chosen else ui.secondary)(label, lambda e, k=key: m.choose_preset(k)))
+        if s.preset == "custom":
+            presets.append(ui.primary("Custom", None))
+        detail = BUILT_IN[s.preset]["detail"] if s.preset in BUILT_IN else (
+            "Your own preset." if s.preset != "custom" else "Your own settings; save them as a preset below.")
+
+        out = [ui.title("Export"),
+               ui.text("Smooths whatever flicker is left in your export, then writes the video, the frames, or both.",
+                       dim=True, size=14),
+               row("Exported frames", ui.text(m.project.export or "Not chosen yet", mono=True, size=14),
+                   ui.secondary("Change", self.choose_export)),
+               row("Preset", ft.Row(presets, spacing=8, wrap=True)), row("", ui.text(detail, dim=True, size=14)),
+               row("Output", ft.SegmentedButton(
+                   segments=[ft.Segment(value=v, label=ft.Text(t)) for v, t in
+                             (("video", "Video"), ("frames", "Frames"), ("both", "Both"))],
+                   selected=[s.output], allow_multiple_selection=False,
+                   on_change=lambda e: m.set_export(output=list(e.control.selected)[0])))]
+        if s.video:
+            out.append(row("Video", path_field(s.video_path, self.typed_video), ui.secondary("Change", self.choose_video)))
+        if s.frames:
+            out.append(row("Frames", path_field(s.frames_folder, lambda v: v.strip() and m.set_frames_folder(v.strip().strip('"'))),
+                           ui.secondary("Change", self.choose_frames)))
+            fmt = [dropdown(s.frames_format, [("jpg", "JPEG"), ("png", "PNG"), ("tif", "16-bit TIFF")],
+                            lambda v: m.set_export(frames_format=v), 180)]
+            if s.frames_format == "jpg":
+                fmt += [ui.text("Quality", dim=True, size=13),
+                        ft.Slider(min=70, max=100, divisions=30, value=s.jpeg_quality, label="{value}", width=220,
+                                  on_change_end=lambda e: m.set_export(jpeg_quality=int(e.control.value)))]
+            out.append(row("Frame format", *fmt))
+
+        out.append(ft.TextButton(("▾ " if self.advanced_open else "▸ ") + "Advanced", on_click=self.toggle_advanced,
+                                 style=ft.ButtonStyle(color=ui.t["text"])))
+        if self.advanced_open:
+            out += self._advanced()
+
+        out.append(ui.panel(ft.Column(
+            [ui.text(check["estimate"], size=14)]
+            + [ui.text(n, dim=True, size=13) for n in check["notes"]]
+            + [ui.text("Before exporting: " + p, size=14) for p in check["problems"]], spacing=6)))
+        name = ft.TextField(hint_text="Preset name", dense=True, width=220, text_size=13, border_color=ui.t["line"])
+        saving = [name, ui.secondary("Save as preset", lambda e: m.save_preset(name.value or ""))]
+        if s.preset not in BUILT_IN and s.preset != "custom":
+            saving.append(ui.secondary("Delete this preset", lambda e: m.delete_preset(s.preset)))
+        self.go_btn = ui.primary("Export", lambda e: m.start_finish(), disabled=not m.can_finish)
+        out.append(ft.Row([ft.Row(saving, spacing=8), self.go_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                          wrap=True))
+        return out
+
+    def _advanced(self) -> list:
+        ui, m, s = self.ui, self.m, self.m.out
+
+        def row(label, *controls):
+            return ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150), *controls],
+                          vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True)
+
+        def dropdown(value, options, on_pick, width=200):
+            return ft.Dropdown(options=[ft.DropdownOption(key=str(k), text=t) for k, t in options], value=str(value),
+                               width=width, dense=True, on_select=lambda e: on_pick(e.control.value))
+        rows = []
+        if s.video:
+            res = [dropdown(s.resolution, [(k, "Original size" if k == "native" else f"Up to {k}") for k in RESOLUTIONS]
+                            + [("custom", "Custom width")], lambda v: m.set_export(resolution=v), 200)]
+            if s.resolution == "custom":
+                res.append(ft.TextField(value=str(s.custom_width or ""), hint_text="width in pixels", width=150, dense=True,
+                                        text_size=13, border_color=ui.t["line"],
+                                        on_blur=lambda e: e.control.value.strip().isdigit() and
+                                        m.set_export(custom_width=int(e.control.value))))
+            rows.append(row("Resolution", *res))
+            rows.append(row("Frame rate", dropdown(s.fps, [(f, f"{f:g}") for f in FRAME_RATES],
+                                                   lambda v: m.set_export(fps=float(v)), 140)))
+            fmt = [dropdown(s.codec, [("h264", "H.264"), ("h265", "H.265"), ("prores", "ProRes")],
+                            lambda v: m.set_export(codec=v, chroma=None, bit_depth=None), 160)]
+            if s.codec == "h265":
+                fmt.append(dropdown(s.bit_depth or 10, [(10, "10-bit"), (8, "8-bit")],
+                                    lambda v: m.set_export(bit_depth=int(v)), 120))
+            if s.codec == "prores":
+                fmt.append(dropdown(s.prores_profile, [("proxy", "Proxy"), ("lt", "LT"), ("standard", "422"),
+                                                       ("hq", "422 HQ"), ("4444", "4444")],
+                                    lambda v: m.set_export(prores_profile=v), 140))
+            else:
+                fmt.append(dropdown(s.chroma or "420", [("420", "4:2:0"), ("422", "4:2:2"), ("444", "4:4:4")],
+                                    lambda v: m.set_export(chroma=v), 120))
+            rows.append(row("Format", *fmt))
+            if s.codec != "prores":
+                crf = s.quality if s.quality is not None else (16 if s.codec == "h264" else 18)
+                rows.append(row("Quality", ui.text("Better", dim=True, size=13),
+                                ft.Slider(min=8, max=32, divisions=24, value=crf, label="CRF {value}", width=260,
+                                          on_change_end=lambda e: m.set_export(quality=int(e.control.value))),
+                                ui.text("Smaller", dim=True, size=13)))
+            rows.append(row("Dither", ft.Switch(value=s.dither, on_change=lambda e: m.set_export(dither=e.control.value)),
+                            ui.text("hides banding in smooth skies (costs a little file size)", dim=True, size=13)))
+        trim = []
+        for label, attr in (("First frame", "first"), ("Last frame", "last")):
+            trim += [ui.text(label, dim=True, size=13),
+                     ft.TextField(value=str(getattr(s, attr) or ""), hint_text="all", width=90, dense=True, text_size=13,
+                                  border_color=ui.t["line"],
+                                  on_blur=lambda e, a=attr: m.set_export(**{a: int(e.control.value)
+                                                                             if e.control.value.strip().isdigit() else None}))]
+        rows.append(row("Trim", *trim))
+        return rows
+
+    # -- actions ----------------------------------------------------------------------------------
+    def toggle_advanced(self, e):
+        self.advanced_open = not self.advanced_open
+        self.box.controls = self._controls()
+        self.view.page.update()
+
+    def typed_video(self, value):
+        text = (value or "").strip().strip('"')
         if text:
-            self.m.set_video_path(Path(text).with_suffix(PRESETS[self.m.preset]["suffix"]))
+            self.m.set_video_path(Path(text).with_suffix(self.m.out.suffix))
 
     async def choose_export(self, e):
         folder = await self.view.ask("get_directory_path", dialog_title="Choose the folder of exported frames")
         if folder:
             self.m.use_export(folder)
 
+    async def choose_frames(self, e):
+        folder = await self.view.ask("get_directory_path", dialog_title="Choose a folder for the corrected frames")
+        if folder:
+            self.m.set_frames_folder(folder)
+
     async def choose_video(self, e):
-        current = Path(self.m.video_path) if self.m.video_path else None
+        current = self.m.video_path
         path = await self.view.ask(
             "save_file", dialog_title="Save the video as", file_name=current.name if current else None,
             initial_directory=str(current.parent) if current else None,
-            file_type=ft.FilePickerFileType.CUSTOM,              # allowed_extensions only works with CUSTOM
-            allowed_extensions=[PRESETS[self.m.preset]["suffix"].lstrip(".")])
+            file_type=ft.FilePickerFileType.CUSTOM, allowed_extensions=[self.m.out.suffix.lstrip(".")])
         if path:
-            self.m.set_video_path(Path(path).with_suffix(PRESETS[self.m.preset]["suffix"]))
+            self.m.set_video_path(Path(path).with_suffix(self.m.out.suffix))
 
 
 class DoneScreen(Screen):

@@ -178,6 +178,8 @@ class Finished:
         shares = ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in
                            sorted(parts.items(), key=lambda kv: -kv[1]) if v / total >= 0.02)
         line = f"Where the time went: {shares}."
+        if t.get("elapsed") and t.get("frames"):
+            line = f"Took {_duration(t['elapsed'])}, about {t['elapsed'] / t['frames']:.2f} s a frame. " + line
         if t.get("read_busy", 0) > 0 and t.get("bytes"):
             speed = t["bytes"] / t["read_busy"] / 1e6
             line += f" Frames were read at about {speed:.0f} MB/s"
@@ -193,6 +195,11 @@ class Finished:
     @property
     def colour_after(self) -> float:
         return _wobble(self.check[:, 0] - self.check[:, 2])
+
+
+def _duration(seconds: float) -> str:
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m} min {s} s" if m else f"{s} s"
 
 
 def plan_export(folder: Path, window: int = 25, colour: bool = True, tracker: Tracker | None = None) -> Planned:
@@ -225,12 +232,15 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                           planned.motion)
     after = Meter()
     timings: dict = {}
+    began = time.perf_counter()
     written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width, options=options,
                            jpeg_quality=jpeg_quality,
                            progress=tracker.stage("Writing") if tracker else None, fmt=fmt, codec=codec,
                            dither=dither, meter=after,
                            finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None,
                            timings=timings)
+    timings["elapsed"] = time.perf_counter() - began
+    timings["frames"] = len(planned.frames)
     check = after.series()
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")
@@ -239,7 +249,9 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                 {"pix_fmt": options.pix_fmt, "quality": options.quality, "prores_profile": options.prores_profile},
                 "frames": [first or 1, last or None] if (first or last) else None,
                 "fps": fps, "width": width, **(settings or {}),
-                "seconds": {k: round(v, 2) for k, v in timings.items() if k != "bytes"}, "bytes_read": timings.get("bytes", 0)}
+                "seconds": {k: round(v, 2) for k, v in timings.items() if k not in ("bytes", "frames")},
+                "seconds_per_frame": round(timings["elapsed"] / max(1, timings["frames"]), 3),
+                "bytes_read": timings.get("bytes", 0)}
     try:
         saved = run_report.write(run_report.finish_report(planned.plan, written if out else None, settings, check,
                                                           findings, planned.motion,

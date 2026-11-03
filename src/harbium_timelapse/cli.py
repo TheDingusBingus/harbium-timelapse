@@ -204,11 +204,18 @@ def _render(args) -> int:
 
 
 def _finish(args) -> int:
-    from .finish import VideoOptions, check_video_target, finished_frames
+    from .finish import VideoOptions, check_output_path, check_video_target, finished_frames
 
     if args.fps <= 0 or (args.width is not None and args.width < 16) or args.window < 3:
         print("Check the numbers: --fps above 0, --width at least 16, --window at least 3.", file=sys.stderr)
         return 1
+    for target_path in (args.out, args.video):
+        if target_path is not None:
+            try:
+                check_output_path(target_path)
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 2
     if args.video is not None:
         try:
             check_video_target(args.video, args.codec)

@@ -199,6 +199,14 @@ CODECS = {
 }
 
 
+def check_output_path(path: Path | str) -> None:
+    """Refuse a path containing "…": it's almost certainly a shortened example copied from instructions
+    (Windows happily makes a folder called "…" at the top of the drive)."""
+    if "\u2026" in str(path):
+        raise ValueError(f'The path {path} contains "…", which looks like a shortened example rather than a real '
+                         "folder. Give the full path.")
+
+
 PRORES_PROFILES = {"proxy": 0, "lt": 1, "standard": 2, "hq": 3, "4444": 4}
 CHROMA = ("420", "422", "444")
 
@@ -344,6 +352,9 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
         raise ValueError('The output format must be "jpg", "png" or "tif".')
     if out is None and video is None:
         raise ValueError("Say where to put the result: a folder for frames, a video file, or both.")
+    for target_path in (out, video):
+        if target_path is not None:
+            check_output_path(target_path)
     if options is not None:
         options.check()
         codec = options.codec
@@ -394,6 +405,14 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
             got = _read(path, with_info=True)
             return got, clock() - start, path.stat().st_size
 
+        saver = ThreadPoolExecutor(1) if out is not None else None      # frames are saved while the next is corrected
+        saved = None
+
+        def save(target, image, information):
+            start = clock()
+            _write(target, image, information, jpeg_quality)
+            return clock() - start
+
         reader = ThreadPoolExecutor(1)
         checker = ThreadPoolExecutor(1) if meter is not None else None     # in order, alongside the next frame
         checked = None
@@ -416,10 +435,10 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 t0 = clock()
                 to_8bit = targets[i].suffix.lower() in (".jpg", ".jpeg", ".png")
                 fixed = correct(img, gains, out_dtype=np.uint8 if to_8bit else None, dither=dither, seed=i)
-                t1 = clock()
-                _write(targets[i], fixed, info, jpeg_quality)
-                spent["correct"] += t1 - t0
-                spent["save"] += clock() - t1
+                spent["correct"] += clock() - t0
+                if saved is not None:
+                    spent["save"] += saved.result()               # the previous frame's save, done meanwhile
+                saved = saver.submit(save, targets[i], fixed, info)
             if video is not None:
                 t0 = clock()
                 if ten_bit:
@@ -442,6 +461,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 progress(i + 1, len(plan.frames))
         if checked is not None:
             spent["check"] += checked.result()          # the last frame's check
+        if saved is not None:
+            spent["save"] += saved.result()                     # the last frame's save
         if encoder is not None and finalising is not None:
             finalising()              # every frame is in; the encoder can take a while to finish the file
         finished = True
@@ -450,6 +471,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
             reader.shutdown(wait=True, cancel_futures=True)
         if locals().get("checker") is not None:
             checker.shutdown(wait=True, cancel_futures=True)
+        if locals().get("saver") is not None:
+            saver.shutdown(wait=True, cancel_futures=True)
         t_close = time.perf_counter()
         if encoder is not None:
             try:
