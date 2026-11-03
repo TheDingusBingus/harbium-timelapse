@@ -163,6 +163,28 @@ class Finished:
     findings: list[Finding]
     report: Path | None
     video: Path | None
+    timings: dict = field(default_factory=dict)
+
+    @property
+    def where_the_time_went(self) -> str:
+        """One plain sentence: what writing spent its time on, and the drive's reading speed."""
+        t = self.timings
+        parts = {"reading frames": t.get("read_busy", 0.0), "correcting": t.get("correct", 0.0),
+                 "checking": t.get("check", 0.0), "the video encoder": t.get("encode", 0.0) + t.get("finalise", 0.0),
+                 "saving frames": t.get("save", 0.0)}
+        total = sum(parts.values())
+        if total <= 0:
+            return ""
+        shares = ", ".join(f"{name} {100 * v / total:.0f}%" for name, v in
+                           sorted(parts.items(), key=lambda kv: -kv[1]) if v / total >= 0.02)
+        line = f"Where the time went: {shares}."
+        if t.get("read_busy", 0) > 0 and t.get("bytes"):
+            speed = t["bytes"] / t["read_busy"] / 1e6
+            line += f" Frames were read at about {speed:.0f} MB/s"
+            if speed < 100 and max(parts, key=parts.get) == "reading frames":
+                line += ": the drive (or its cable) is what's holding things up"
+            line += "."
+        return line
 
     @property
     def brightness_after(self) -> float:
@@ -194,19 +216,22 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     if video is not None:
         check_video_target(video, codec)
     after = Meter()
+    timings: dict = {}
     written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width,
                            progress=tracker.stage("Writing") if tracker else None, fmt=fmt, codec=codec,
                            dither=dither, meter=after,
-                           finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None)
+                           finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None,
+                           timings=timings)
     check = after.series()
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")
     settings = {"measure": "regional-vote-1", "codec": codec if video else None, "dither": dither,
-                "fps": fps, "width": width, **(settings or {})}
+                "fps": fps, "width": width, **(settings or {}),
+                "seconds": {k: round(v, 2) for k, v in timings.items() if k != "bytes"}, "bytes_read": timings.get("bytes", 0)}
     try:
         saved = run_report.write(run_report.finish_report(planned.plan, written if out else None, settings, check,
                                                           findings, planned.motion,
                                                           where=Path(out) if out else Path(video).parent), where)
     except OSError:
         saved = None
-    return Finished(written, check, findings, saved, Path(video) if video else None)
+    return Finished(written, check, findings, saved, Path(video) if video else None, timings)

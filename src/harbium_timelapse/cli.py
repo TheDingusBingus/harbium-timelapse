@@ -255,6 +255,8 @@ def _finish(args) -> int:
         print(f"  Corrected frames: {args.out}")
     if args.video:
         print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
+    if done.where_the_time_went:
+        print(f"  {done.where_the_time_went}")
     print(f"  Report: {done.report}" if done.report else "  (Couldn't save the run report.)")
     return 0
 

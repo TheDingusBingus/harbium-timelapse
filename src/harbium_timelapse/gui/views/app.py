@@ -95,7 +95,8 @@ class StartScreen(Screen):
     def build(self):
         ui = self.ui
         recent = [ft.Container(
-            ft.Row([ui.text(Path(r["folder"]).name), ui.text(f"{r['frames']} frames", dim=True),
+            ft.Row([ui.text(f"{Path(r['folder']).parent.name} / {Path(r['folder']).name}"),
+                    ui.text(f"{r['frames']} frames", dim=True),
                     ui.text(r["stage"].capitalize(), dim=True)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             padding=ft.Padding(4, 12, 4, 12), border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"])),
             on_click=lambda e, f=r["folder"]: self.m.open_folder(f), ink=True) for r in self.m.recent]
@@ -122,10 +123,18 @@ class FolderScreen(Screen):
                        spacing=36, wrap=True)
         cards = []
         for p in m.problems or [{"serious": False, "message": "Nothing to report: the folder looks ready.", "fix": ""}]:
-            icon = ft.Container(ft.Text("!" if p["serious"] or p["fix"] else "✓", size=12, color=ui.t["bg"]),
+            icon = ft.Container(ft.Text("!" if (p["serious"] or p["fix"]) and not p.get("note") else "✓", size=12,
+                                        color=ui.t["bg"]),
                                 width=20, height=20, border_radius=10, bgcolor=ui.t["text"],
                                 alignment=ft.Alignment.CENTER)
             body = [ui.text(p["message"])] + ([ui.text(p["fix"], dim=True, size=14)] if p["fix"] else [])
+            if p.get("details"):
+                listing = ft.Column([ui.text(d, dim=True, size=13) for d in p["details"]], spacing=2, visible=False)
+                def toggle(e, box=listing):
+                    box.visible = not box.visible
+                    e.control.text = "Hide them" if box.visible else "Show them"
+                    self.view.page.update()
+                body += [ft.TextButton("Show them", on_click=toggle, style=ft.ButtonStyle(color=ui.t["dim"])), listing]
             cards.append(ft.Container(ft.Row([icon, ft.Column(body, spacing=2, expand=True)],
                                              vertical_alignment=ft.CrossAxisAlignment.START),
                                       padding=ft.Padding(0, 10, 0, 10),
@@ -266,8 +275,9 @@ class FinishScreen(Screen):
                                on_select=lambda e: m.set_fps(float(e.control.value)))
         self.go_btn = ui.primary("Finish video", lambda e: m.start_finish())
         self.refresh()
-        row = lambda label, *controls: ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150),
-                                               *controls], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        def row(label, *controls):
+            return ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150), *controls],
+                          vertical_alignment=ft.CrossAxisAlignment.CENTER)
         return ft.Column([
             ui.title("Finish"),
             ui.text("Smooths whatever flicker is left in your export and makes the video.", dim=True, size=14),

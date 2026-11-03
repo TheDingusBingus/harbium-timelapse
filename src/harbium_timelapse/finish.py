@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
@@ -224,7 +226,7 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                  fps: float = 24, width: int | None = None, quality: int | None = None,
                  progress: Progress | None = None, fmt: str | None = None,
                  codec: str = "h264", dither: bool = True, meter: "Meter | None" = None,
-                 finalising: Callable[[], None] | None = None) -> list[Path]:
+                 finalising: Callable[[], None] | None = None, timings: dict | None = None) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -232,7 +234,23 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
 
     Frames that go dark (dusk into night) are best exported as 16-bit TIFF:
     in 8-bit, shadows have too few levels to measure or correct small changes
-    precisely. Correct in 16-bit, write JPEGs with ``fmt="jpg"``."""
+    precisely. Correct in 16-bit, write JPEGs with ``fmt="jpg"``.
+
+    ``codec``: "h264" (default, plays anywhere), "h265" (10-bit) or "prores"
+    (ProRes 422 HQ, 10-bit, in a .mov). 10-bit video is fed the correction at
+    16-bit precision, so it never goes through 8-bit rounding. ``dither``: hide
+    the 8-bit rounding of corrected frames (see ``correct``). ``meter``:
+    measures each corrected frame in memory as it's written, for the
+    self-check. ``finalising``: called once every frame is in, before the
+    encoder finishes the file (which can take a while).
+
+    The video is written under a temporary name and renamed when complete, so
+    a stopped or failed run never leaves a half-made video behind. The next
+    frame is read in the background while the current one is corrected
+    (decoding runs outside Python's lock), so the drive and the correction
+    overlap. ``timings``: if given, gets the seconds spent on each part (read:
+    waiting for a frame; read_busy: the reading itself; correct, save, check,
+    encode: waiting for the encoder; finalise) and the bytes read."""
     if fmt is not None and fmt.lower().lstrip(".") not in ("jpg", "jpeg", "png", "tif", "tiff"):
         raise ValueError('The output format must be "jpg", "png" or "tif".')
     if out is None and video is None:
@@ -271,31 +289,74 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
     finished = False
     try:
         ten_bit = video is not None and CODECS[codec][3]
+        clock = time.perf_counter
+        spent = timings if timings is not None else {}
+        for k in ("read", "correct", "save", "check", "encode", "finalise", "read_busy"):
+            spent.setdefault(k, 0.0)
+        spent.setdefault("bytes", 0)
+
+        def read(path):
+            start = clock()
+            got = _read(path, with_info=True)
+            return got, clock() - start, path.stat().st_size
+
+        reader = ThreadPoolExecutor(1)
+        checker = ThreadPoolExecutor(1) if meter is not None else None     # in order, alongside the next frame
+        checked = None
+
+        def check(image):
+            start = clock()
+            meter.add(_small_linear(image))
+            return clock() - start
+        ahead = reader.submit(read, plan.frames[0]) if plan.frames else None
         for i, (path, gains) in enumerate(zip(plan.frames, plan.gains, strict=True)):
-            img, info = _read(path, with_info=True)
+            t0 = clock()
+            (img, info), busy, size = ahead.result()
+            if i + 1 < len(plan.frames):
+                ahead = reader.submit(read, plan.frames[i + 1])
+            spent["read"] += clock() - t0
+            spent["read_busy"] += busy
+            spent["bytes"] += size
             fixed = None
             if out is not None:
+                t0 = clock()
                 to_8bit = targets[i].suffix.lower() in (".jpg", ".jpeg", ".png")
                 fixed = correct(img, gains, out_dtype=np.uint8 if to_8bit else None, dither=dither, seed=i)
+                t1 = clock()
                 _write(targets[i], fixed, info)
+                spent["correct"] += t1 - t0
+                spent["save"] += clock() - t1
             if video is not None:
+                t0 = clock()
                 if ten_bit:
                     frame = correct(img, gains, out_dtype=np.uint16)
                 elif fixed is not None and fixed.dtype == np.uint8:
                     frame = fixed
                 else:
                     frame = correct(img, gains, out_dtype=np.uint8, dither=dither, seed=i)
+                t1 = clock()
                 if encoder is None:
                     encoder = _Encoder(partial, frame, fps, width, quality, codec)
                 encoder.write(frame)
-            if meter is not None:
-                meter.add(_small_linear(fixed if fixed is not None else frame))
+                spent["correct"] += t1 - t0
+                spent["encode"] += clock() - t1
+            if checker is not None:
+                if checked is not None:
+                    spent["check"] += checked.result()          # the previous frame's check, done meanwhile
+                checked = checker.submit(check, fixed if fixed is not None else frame)
             if progress:
                 progress(i + 1, len(plan.frames))
+        if checked is not None:
+            spent["check"] += checked.result()          # the last frame's check
         if encoder is not None and finalising is not None:
             finalising()              # every frame is in; the encoder can take a while to finish the file
         finished = True
     finally:
+        if "reader" in locals():
+            reader.shutdown(wait=True, cancel_futures=True)
+        if locals().get("checker") is not None:
+            checker.shutdown(wait=True, cancel_futures=True)
+        t_close = time.perf_counter()
         if encoder is not None:
             try:
                 encoder.close()
@@ -303,6 +364,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 finished = False
                 raise
             finally:
+                if timings is not None:
+                    timings["finalise"] = timings.get("finalise", 0.0) + time.perf_counter() - t_close
                 if partial is not None and partial.exists():
                     if finished:
                         os.replace(partial, video)
@@ -362,7 +425,12 @@ def correct(img: np.ndarray, gains_stops, out_dtype=None, dither: bool = False, 
     if out_dtype == img.dtype:
         out = img.copy()
     else:
-        out = np.round(img.astype(np.float64) * (out_levels / in_levels)).astype(out_dtype)
+        # Fill channel by channel through lookup tables: converting the whole frame to floating point
+        # first made a copy of about 480 MB for a 20-megapixel frame, only to overwrite it.
+        out = np.empty(img.shape, out_dtype)
+        identity = np.round(np.arange(in_levels + 1, dtype=np.float64) * (out_levels / in_levels)).astype(out_dtype)
+        for c in range(len(gains), img.shape[-1]):
+            out[..., c] = identity[img[..., c]]
     linear = _srgb_to_linear(np.arange(in_levels + 1, dtype=np.float64) / in_levels)
     rng = np.random.default_rng(seed) if dither else None
     for c, g in enumerate(gains):
@@ -395,8 +463,11 @@ def _small_linear(img: np.ndarray) -> np.ndarray:
     lut = _srgb_to_linear(np.arange(_levels(img) + 1, dtype=np.float64) / _levels(img)).astype(np.float32)
     step = max(1, max(img.shape[:2]) // LONG_EDGE)
     h, w = (img.shape[0] // step) * step, (img.shape[1] // step) * step
-    lin = lut[img[:h, :w, :3]]
-    return lin.reshape(h // step, step, w // step, step, 3).mean(axis=(1, 3), dtype=np.float64)
+    out = np.empty((h // step, w // step, 3))
+    for c in range(3):                     # a channel at a time: smaller and far kinder to memory than all at once
+        rows = lut[img[:h, :w, c]].reshape(h, w // step, step).sum(axis=2, dtype=np.float64)
+        out[..., c] = rows.reshape(h // step, step, w // step).sum(axis=1) / (step * step)
+    return out
 
 
 # --- files ---------------------------------------------------------------------

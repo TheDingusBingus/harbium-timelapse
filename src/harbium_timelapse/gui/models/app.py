@@ -251,7 +251,20 @@ class AppModel:
     def problems(self) -> list[dict]:
         if self.opened is None:
             return []
-        return [{"serious": p.serious, "message": p.message, "fix": p.fix} for p in self.opened.problems]
+        cards, changes = [], [p for p in self.opened.problems if p.kind == "settings_change"]
+        for p in self.opened.problems:
+            if p.kind != "settings_change":
+                cards.append({"serious": p.serious, "message": p.message, "fix": p.fix, "note": False})
+        if changes:
+            first, last = changes[0].message, changes[-1].message
+            def name(m: str) -> str:
+                return m.split(" at ", 1)[-1].split(":", 1)[0] if " at " in m else ""
+            span = f", from {name(first)} to {name(last)}" if len(changes) > 1 else f" at {name(first)}"
+            cards.append({"serious": False, "note": True, "fix": "",
+                          "message": f"{len(changes)} exposure change{'s' if len(changes) > 1 else ''} while shooting"
+                                     f"{span}. Nothing to do: each is smoothed into a gentle ramp.",
+                          "details": [p.message for p in changes]})
+        return cards
 
     @property
     def next_step(self) -> tuple[str, str]:
@@ -501,6 +514,8 @@ class AppModel:
                  f"Colour wobble {p.colour_before:.3f} before, {self.finished.colour_after:.3f} after."]
         if self.planned.moving_camera:
             lines.append(self.planned.moving_camera)
+        if self.finished.where_the_time_went:
+            lines.append(self.finished.where_the_time_went)
         return lines
 
     @property
