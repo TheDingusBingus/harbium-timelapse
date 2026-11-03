@@ -161,6 +161,13 @@ class SliceViewer:
     def __init__(self, view: "View"):
         self.view, self.m, self.ui = view, view.model, view.ui
         self.show = "both"
+        self.saved: Path | None = None
+        # The viewer covers the window's message banner, so it says what it saved in its own bar.
+        self.note = ft.Text("", size=13, color=self.ui.t["text"])
+        self.reveal = self.ui.secondary("Show in folder", lambda e: self.saved and open_path(self.saved, select=True))
+        self.reveal.visible = False
+        self.saved_row = ft.Container(ft.Row([self.note, self.reveal], spacing=10), bgcolor=self.ui.t["panel"],
+                                      padding=ft.Padding(10, 4, 10, 4), border_radius=2, visible=False)
 
     def open(self) -> None:
         SliceViewer.current = self
@@ -192,8 +199,12 @@ class SliceViewer:
         try:
             Image.fromarray(pictures[0 if which == "before" else 1]).save(target)
             self.m._notice(f"Saved {target}")
+            self.saved, self.note.value, self.reveal.visible = target, f"Saved {target}", True
+            self.saved_row.visible = True
         except OSError as e:
             self.m._notice(f"Couldn't save the picture: {e}", "error")
+            self.note.value, self.reveal.visible = f"Couldn't save the picture: {e}", False
+            self.saved_row.visible = True
         self.m.changed()
         self.view.page.update()
 
@@ -238,6 +249,8 @@ class SliceViewer:
                     ui.secondary("Save After", lambda e: self.save("after")),
                     ui.primary("Close", self.close)], spacing=8)],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN), bgcolor=ui.t["panel"], padding=10, border_radius=2)
+        self.saved_row.visible = self.saved is not None or bool(self.note.value)
+        bar = ft.Column([bar, self.saved_row], spacing=6)
         self.layer.content = ft.Column([bar, ft.Row(shown, spacing=12),
                                         ft.Text("Scroll to zoom, drag to look around. Esc closes.", color="#e8e4db",
                                                 size=12)], spacing=10)
