@@ -1,6 +1,7 @@
 """Phase 0: the groundwork the app stands on (review, report, cancelling, motion, fixes, hand-off)."""
 
 import json
+import shutil
 
 import numpy as np
 import pytest
@@ -123,6 +124,7 @@ def test_reports_from_newer_versions_or_other_tools_are_refused(tmp_path):
         report.read(tmp_path)
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 def test_cancelling_stops_writing_and_never_leaves_half_a_video(tmp_path):
     paths = frames(tmp_path / "e")
     plan = plan_finish(paths)

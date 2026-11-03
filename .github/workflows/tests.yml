@@ -2,8 +2,10 @@ name: tests
 on: [push, pull_request]
 jobs:
   test:
+    # The full suite, with ffmpeg and ExifTool installed so video-making and settings-reading are tested too.
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false            # one failing Python version shouldn't hide how the others did
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
@@ -11,5 +13,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libimage-exiftool-perl
+      - run: pip install -e ".[dev,tiff]"
+      - run: pytest -q
+  bare:
+    # Without ffmpeg or ExifTool: every test that needs them must skip, never fail.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: pytest -q
