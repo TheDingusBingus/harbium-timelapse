@@ -1,0 +1,445 @@
+"""The screens: a shell (header, stage bar, messages, job progress) and one class per step.
+
+Each screen is built once when it's shown and then refreshed in place, so a
+slider being dragged is never rebuilt under the pointer. Everything shown comes
+from ``AppModel``; every click calls one of its commands.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import flet as ft
+
+from ...app.session import ExportStatus
+from ..models import AppModel, Series, render_timeline
+from ..models.app import PRESETS
+from ..models.timeline import Theme
+from ..theme import BODY, DARK, DISPLAY, FONTS, LIGHT, MONO
+
+FPS_CHOICES = ("23.976", "24", "25", "29.97", "30", "50", "60")
+
+
+def open_path(path: Path, select: bool = False) -> None:
+    """Open a file with its usual program, or show it in its folder."""
+    path = Path(path)
+    if sys.platform.startswith("win"):
+        if select:
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            os.startfile(str(path))                      # noqa: S606 - opening the user's own file
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R" if select else "", str(path)] if select else ["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent if select else path)])
+
+
+class UI:
+    """Small helpers so every screen uses the same brand styles."""
+
+    def __init__(self, tokens: dict):
+        self.t = tokens
+
+    def title(self, text: str, size: int = 32) -> ft.Text:
+        return ft.Text(text, font_family=DISPLAY, size=size, color=self.t["text"], weight=ft.FontWeight.W_500)
+
+    def text(self, text: str, dim: bool = False, size: int = 15, mono: bool = False, selectable=False) -> ft.Text:
+        return ft.Text(text, font_family=MONO if mono else BODY, size=size - (1 if mono else 0),
+                       color=self.t["dim" if dim else "text"], selectable=selectable)
+
+    def primary(self, label: str, on_click, disabled: bool = False) -> ft.FilledButton:
+        t = self.t
+        return ft.FilledButton(label, on_click=on_click, disabled=disabled, style=ft.ButtonStyle(
+            bgcolor={ft.ControlState.DEFAULT: t["primary_bg"], ft.ControlState.DISABLED: t["line"]},
+            color={ft.ControlState.DEFAULT: t["primary_text"], ft.ControlState.DISABLED: t["dim"]},
+            shape=ft.RoundedRectangleBorder(radius=2), padding=ft.Padding(18, 14, 18, 14)))
+
+    def secondary(self, label: str, on_click, disabled: bool = False) -> ft.OutlinedButton:
+        t = self.t
+        return ft.OutlinedButton(label, on_click=on_click, disabled=disabled, style=ft.ButtonStyle(
+            color={ft.ControlState.DEFAULT: t["text"], ft.ControlState.DISABLED: t["dim"]},
+            shape=ft.RoundedRectangleBorder(radius=2),
+            side=ft.BorderSide(1, t["line"]), padding=ft.Padding(16, 14, 16, 14)))
+
+    def panel(self, content, padding: int = 16) -> ft.Container:
+        return ft.Container(content, bgcolor=self.t["panel"], padding=padding, border_radius=2,
+                            border=ft.Border.all(1, self.t["line"]))
+
+    def mark(self, size: int = 28) -> ft.Container:
+        """The H mark from harbium.studio's favicon."""
+        return ft.Container(ft.Text("H", font_family=DISPLAY, size=size * 0.78, color=self.t["bg"]),
+                            width=size, height=size, bgcolor=self.t["text"], alignment=ft.Alignment.CENTER)
+
+
+# --- the screens ---------------------------------------------------------------------------------
+
+class Screen:
+    def __init__(self, view: "View"):
+        self.view, self.m, self.ui = view, view.model, view.ui
+
+    def build(self) -> ft.Control:
+        raise NotImplementedError
+
+    def refresh(self) -> None:
+        """Update in place after the model changes. Default: nothing to update."""
+
+    def leave(self) -> None:
+        """Called when another screen takes over."""
+
+
+class StartScreen(Screen):
+    def build(self):
+        ui = self.ui
+        recent = [ft.Container(
+            ft.Row([ui.text(Path(r["folder"]).name), ui.text(f"{r['frames']} frames", dim=True),
+                    ui.text(r["stage"].capitalize(), dim=True)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=ft.Padding(4, 12, 4, 12), border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"])),
+            on_click=lambda e, f=r["folder"]: self.m.open_folder(f), ink=True) for r in self.m.recent]
+        return ft.Column([
+            ui.title("Open a timelapse"),
+            ui.text("Choose the folder with your RAW frames, or an export to finish. Nothing in it changes "
+                    "until you say so.", dim=True),
+            ft.Container(height=8),
+            ft.Row([ui.primary("Choose folder", self.choose)]),
+            ft.Container(height=24),
+            *([ui.text("Recent", size=14), *recent] if recent else []),
+        ], spacing=10, width=760)
+
+    async def choose(self, e):
+        folder = await self.view.picker.get_directory_path(dialog_title="Choose a folder of timelapse frames")
+        if folder:
+            self.m.open_folder(folder)
+
+
+class FolderScreen(Screen):
+    def build(self):
+        ui, m = self.ui, self.m
+        facts = ft.Row([ft.Column([ui.text(k, dim=True, size=13), ui.text(v)], spacing=2) for k, v in m.facts],
+                       spacing=36, wrap=True)
+        cards = []
+        for p in m.problems or [{"serious": False, "message": "Nothing to report: the folder looks ready.", "fix": ""}]:
+            icon = ft.Container(ft.Text("!" if p["serious"] or p["fix"] else "✓", size=12, color=ui.t["bg"]),
+                                width=20, height=20, border_radius=10, bgcolor=ui.t["text"],
+                                alignment=ft.Alignment.CENTER)
+            body = [ui.text(p["message"])] + ([ui.text(p["fix"], dim=True, size=14)] if p["fix"] else [])
+            cards.append(ft.Container(ft.Row([icon, ft.Column(body, spacing=2, expand=True)],
+                                             vertical_alignment=ft.CrossAxisAlignment.START),
+                                      padding=ft.Padding(0, 10, 0, 10),
+                                      border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"]))))
+        target, label = m.next_step
+        actions = [ui.primary(label, lambda e: m.go(target), disabled=not m.can_go(target))]
+        resume = []
+        if m.resume:
+            where, words = m.resume
+            resume = [ui.panel(ft.Row([ui.text(words), ui.secondary("Carry on from there", lambda e: m.go(where))],
+                                      alignment=ft.MainAxisAlignment.SPACE_BETWEEN))]
+        return ft.Column([ui.title(Path(m.opened.seq.folder).name, 30), facts, *resume,
+                          ui.text("Folder check", size=14), *cards, ft.Row(actions, alignment=ft.MainAxisAlignment.END)],
+                         spacing=14, width=900)
+
+
+class PrepareScreen(Screen):
+    WIDTH, HEIGHT = 760, 260
+
+    def build(self):
+        ui, m = self.ui, self.m
+        self.timeline = ft.RawImage(width=self.WIDTH, height=self.HEIGHT)
+        self.summary = ui.text("", dim=True, size=14)
+        self.notes = ft.Column(spacing=4)
+        self.apply_btn = ui.primary("Apply corrections", lambda e: m.apply())
+        self.state = ui.text("", dim=True, size=14)
+        self.slider = ft.Slider(min=7, max=61, divisions=27, value=m.window, label="{value} frames",
+                                on_change=lambda e: m.set_window(int(e.control.value)), expand=True)
+        side = [ui.title("Prepare"),
+                ui.text("The light as measured from your RAW files, and the smooth curve the corrections "
+                        "will follow. Nothing changes until you apply.", dim=True, size=14)]
+        if m.white_balance_available:
+            side.append(ft.Switch(label="Steady the camera's auto white balance", value=m.white_balance,
+                                  on_change=lambda e: m.set_white_balance(e.control.value)))
+        side += [ui.text("Smoothness", size=14),
+                 ft.Row([ui.text("Steady", dim=True, size=13), self.slider, ui.text("Follows\nthe light", dim=True,
+                                                                                       size=13)], spacing=4)]
+        if m.needs_metadata_saved:
+            side.append(ft.Row([ft.Checkbox(value=m.metadata_saved,
+                                            on_change=lambda e: m.confirm_metadata_saved(e.control.value)),
+                                ft.Container(ui.text("In Lightroom, I selected every frame and chose Metadata > "
+                                                     "Save Metadata to Files", size=14), expand=True)],
+                               vertical_alignment=ft.CrossAxisAlignment.START))
+        side += [self.summary, self.notes, self.state,
+                 ft.Row([ui.secondary("Undo", lambda e: m.undo()), self.apply_btn], spacing=10)]
+        self._drawn = None
+        self.refresh()
+        return ft.Row([ft.Column(side, spacing=12, width=380),
+                       ui.panel(ft.Column([ui.text("Brightness (stops): measured, and the smoothing curve",
+                                                   dim=True, size=13), self.timeline], spacing=8), padding=12)],
+                      spacing=28, vertical_alignment=ft.CrossAxisAlignment.START, wrap=True)
+
+    def refresh(self):
+        m, ui = self.m, self.ui
+        self.summary.value = m.prepare_summary
+        self.notes.controls = [ui.text(n, dim=True, size=13) for n in (m.preview.notes if m.preview else [])]
+        self.apply_btn.disabled = not m.can_apply
+        self.state.value = ("Measuring your RAW files..." if m.measured is None
+                            else "Updating..." if m.previewing else "")
+        if m.preview is not None and m.preview is not self._drawn:
+            self._drawn = m.preview
+            self.view.page.run_task(self.draw)
+
+    async def draw(self):
+        series = self.m.prepare_series
+        if series is None:
+            return
+        measured, curve = series
+        t = self.ui.t
+        img = await asyncio.to_thread(render_timeline,
+                                      [Series(measured, t["measured"], 1), Series(curve, t["curve"], 3)],
+                                      self.WIDTH, self.HEIGHT, self.view.chart_theme, steps=self.m.exposure_steps)
+        await self.timeline.render(img)
+
+
+class GradeScreen(Screen):
+    def build(self):
+        ui, m = self.ui, self.m
+        editor = m.opened.editor.label if m.opened.editor else "your editor"
+        self.watch = ft.Column(spacing=10)
+        self._polling = True
+        self.view.page.run_task(self.poll)
+        self.refresh()
+        steps = [ft.Container(ui.text(s, size=14), padding=ft.Padding(0, 10, 0, 10),
+                              border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"]))) for s in m.handoff_steps]
+        return ft.Row([ft.Column([ui.title(f"Over to {editor}."),
+                                  ui.text("Grade the sequence however you like, then export every frame. "
+                                          "This screen notices when the export lands.", dim=True, size=14),
+                                  *steps], spacing=8, width=420),
+                       ft.Container(ui.panel(self.watch), width=440)],
+                      spacing=32, vertical_alignment=ft.CrossAxisAlignment.START, wrap=True)
+
+    def refresh(self):
+        ui, m = self.ui, self.m
+        s = m.export or ExportStatus("waiting")
+        choose = ui.secondary("Choose folder instead", self.choose)
+        if s.state == "waiting":
+            self.watch.controls = [ui.text("Watching for a new export..."), choose]
+        elif s.state == "arriving":
+            total = len(m.opened.seq)
+            self.watch.controls = [ui.text(f"Export arriving: {s.frames} of {total} frames"),
+                                   ui.text(str(s.folder), dim=True, mono=True, size=13),
+                                   ft.ProgressBar(value=min(1.0, s.frames / total), color=ui.t["text"],
+                                                  bgcolor=ui.t["line"]), choose]
+        else:
+            self.watch.controls = [ui.text(f"Found {s.frames} exported frames.", size=17),
+                                   ui.text(str(s.folder), dim=True, mono=True, size=13),
+                                   ui.text("All there and nothing changing for a few seconds, so the export "
+                                           "looks complete.", dim=True, size=14),
+                                   ft.Row([ui.primary("Finish now", lambda e: m.use_export()), choose])]
+
+    async def poll(self):
+        while self._polling:
+            await asyncio.to_thread(self.m.poll_export)
+            await asyncio.sleep(1.0)
+
+    def leave(self):
+        self._polling = False
+
+    async def choose(self, e):
+        folder = await self.view.picker.get_directory_path(dialog_title="Choose the folder of exported frames")
+        if folder:
+            self.m.use_export(folder)
+
+
+class FinishScreen(Screen):
+    def build(self):
+        ui, m = self.ui, self.m
+        self.export_text = ui.text("", mono=True, size=14)
+        self.video_text = ui.text("", mono=True, size=14)
+        self.detail = ui.text("", dim=True, size=14)
+        self.presets = ft.SegmentedButton(
+            segments=[ft.Segment(value=k, label=ft.Text(v["label"])) for k, v in PRESETS.items()],
+            selected=[m.preset], allow_multiple_selection=False,
+            on_change=lambda e: m.choose_preset(list(e.control.selected)[0]))
+        self.fps = ft.Dropdown(options=[ft.DropdownOption(key=f, text=f) for f in FPS_CHOICES],
+                               value=str(m.fps), width=140,
+                               on_select=lambda e: m.set_fps(float(e.control.value)))
+        self.go_btn = ui.primary("Finish video", lambda e: m.start_finish())
+        self.refresh()
+        row = lambda label, *controls: ft.Row([ft.Container(ui.text(label, dim=True, size=14), width=150),
+                                               *controls], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        return ft.Column([
+            ui.title("Finish"),
+            ui.text("Smooths whatever flicker is left in your export and makes the video.", dim=True, size=14),
+            row("Exported frames", self.export_text, ui.secondary("Change", self.choose_export)),
+            row("Video", self.presets), row("", self.detail),
+            row("Frame rate", self.fps),
+            row("Save to", self.video_text, ui.secondary("Change", self.choose_video)),
+            row("", ft.Checkbox(label="Also save the corrected frames as files", value=m.also_frames,
+                                on_change=lambda e: m.set_also_frames(e.control.value))),
+            ft.Row([self.go_btn], alignment=ft.MainAxisAlignment.END),
+        ], spacing=14, width=900)
+
+    def refresh(self):
+        m = self.m
+        self.export_text.value = m.project.export or "Not chosen yet"
+        self.video_text.value = str(m.video_path) if m.video_path else ""
+        self.detail.value = PRESETS[m.preset]["detail"]
+        self.go_btn.disabled = not m.can_finish
+
+    async def choose_export(self, e):
+        folder = await self.view.picker.get_directory_path(dialog_title="Choose the folder of exported frames")
+        if folder:
+            self.m.use_export(folder)
+
+    async def choose_video(self, e):
+        current = Path(self.m.video_path) if self.m.video_path else None
+        path = await self.view.picker.save_file(
+            dialog_title="Save the video as", file_name=current.name if current else None,
+            initial_directory=str(current.parent) if current else None,
+            allowed_extensions=[PRESETS[self.m.preset]["suffix"].lstrip(".")])
+        if path:
+            self.m.set_video_path(Path(path).with_suffix(PRESETS[self.m.preset]["suffix"]))
+
+
+class DoneScreen(Screen):
+    def build(self):
+        ui, m = self.ui, self.m
+        self.flags = ft.Column(spacing=0)
+        self.refresh()
+        video = m.finished.video
+        return ft.Column([
+            ui.title("Finished."),
+            *[ui.text(line, dim=True, size=14) for line in m.result_lines],
+            ui.panel(ft.Row([ui.text(str(video), mono=True, size=14, selectable=True),
+                             ft.Row([ui.secondary("Show in folder", lambda e: open_path(video, select=True)),
+                                     ui.primary("Play video", lambda e: open_path(video))], spacing=10)],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True)) if video else ft.Container(),
+            ui.text("Worth a look", size=14), self.flags,
+            ft.Row([ui.secondary("Open another folder", lambda e: m.go("start"))]),
+        ], spacing=14, width=900)
+
+    def refresh(self):
+        ui, m = self.ui, self.m
+        items = m.worth_a_look
+        if not items:
+            self.flags.controls = [ui.text("Nothing stands out: no frame breaks away from its neighbours.",
+                                           dim=True, size=14)]
+            return
+        self.flags.controls = [ft.Container(
+            ft.Row([ui.text(name, mono=True, size=14), ft.Container(ui.text(note, dim=True, size=14), expand=True),
+                    ui.secondary("Looks fine", lambda e, n=name: m.looks_fine(n))], spacing=16),
+            padding=ft.Padding(0, 8, 0, 8), border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"])))
+            for name, note in items]
+
+
+SCREENS = {"start": StartScreen, "folder": FolderScreen, "prepare": PrepareScreen, "grade": GradeScreen,
+           "finish": FinishScreen, "done": DoneScreen}
+
+
+# --- the shell --------------------------------------------------------------------------------------
+
+class View:
+    def __init__(self, page: ft.Page, model: AppModel):
+        self.page, self.model = page, model
+        dark = page.platform_brightness != ft.Brightness.LIGHT
+        self.tokens = DARK if dark else LIGHT
+        self.ui = UI(self.tokens)
+        self.chart_theme = Theme() if dark else Theme(background=(222, 217, 206), grid=(199, 193, 181),
+                                                      text=(94, 90, 82), mark=(10, 10, 10))
+        self.picker = ft.FilePicker()
+        page.services.append(self.picker)
+        self.screen: Screen | None = None
+        self.screen_name = None
+        self._build_shell()
+        model.subscribe(self.refresh)
+        self.refresh()
+
+    def _build_shell(self):
+        ui, t = self.ui, self.tokens
+        self.project_name = ui.text("", dim=True, size=14)
+        self.stage_bar = ft.Row(spacing=4)
+        self.banner_text = ui.text("", size=14)
+        self.banner = ft.Container(ft.Row([ft.Container(self.banner_text, expand=True),
+                                           ft.TextButton("Dismiss", on_click=lambda e: self.model.dismiss_message(),
+                                                         style=ft.ButtonStyle(color=t["text"]))]),
+                                   padding=ft.Padding(16, 10, 16, 10), bgcolor=t["panel"],
+                                   border=ft.Border(bottom=ft.BorderSide(1, t["line"])), visible=False)
+        self.job_text = ui.text("", size=14)
+        self.job_bar = ft.ProgressBar(value=None, color=t["text"], bgcolor=t["line"])
+        self.cancel_btn = ui.secondary("Cancel", lambda e: self.model.cancel())
+        self.job_panel = ft.Container(ft.Column([ft.Row([ft.Container(self.job_text, expand=True), self.cancel_btn]),
+                                                 self.job_bar], spacing=8),
+                                      padding=ft.Padding(24, 12, 24, 12), bgcolor=t["panel"],
+                                      border=ft.Border(bottom=ft.BorderSide(1, t["line"])), visible=False)
+        self.body = ft.Container(padding=ft.Padding(32, 28, 32, 28), expand=True)
+        header = ft.Container(ft.Row([ui.mark(), ft.Text("Harbium", font_family=DISPLAY, size=26, color=t["text"]),
+                                      ui.text("Timelapse", dim=True, size=14), ft.Container(width=16),
+                                      self.project_name], spacing=10,
+                                     vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                              padding=ft.Padding(24, 14, 24, 14), border=ft.Border(bottom=ft.BorderSide(1, t["line"])))
+        self.stage_box = ft.Container(self.stage_bar, padding=ft.Padding(20, 6, 20, 6),
+                                      border=ft.Border(bottom=ft.BorderSide(1, t["line"])))
+        self.page.add(ft.Column([header, self.stage_box, self.banner, self.job_panel,
+                                 ft.Column([self.body], scroll=ft.ScrollMode.AUTO, expand=True)],
+                                spacing=0, expand=True))
+
+    def _stage_button(self, number: int, screen: str, label: str, state: str) -> ft.Control:
+        t = self.tokens
+        filled = state in ("done", "current")
+        dot = ft.Container(ft.Text("✓" if state == "done" else str(number), size=12,
+                                   color=t["bg"] if filled else t["dim"]),
+                           width=22, height=22, border_radius=11, alignment=ft.Alignment.CENTER,
+                           bgcolor=t["text"] if filled else None, border=ft.Border.all(1, t["line"] if not filled else t["text"]))
+        text = ft.Text(label, font_family=BODY, size=14, weight=ft.FontWeight.W_600 if state == "current" else None,
+                       color=t["text"] if state in ("current", "done", "open") else t["dim"])
+        return ft.Container(ft.Row([dot, text], spacing=8), padding=ft.Padding(10, 8, 10, 8),
+                            on_click=None if state == "locked" else (lambda e, s=screen: self.model.go(s)),
+                            opacity=0.5 if state == "locked" else 1.0)
+
+    def refresh(self):
+        m = self.model
+        self.project_name.value = Path(m.opened.seq.folder).name if m.opened else ""
+        self.stage_box.visible = m.screen != "start"
+        self.stage_bar.controls = [self._stage_button(i + 1, s, label, state)
+                                   for i, (s, label, state) in enumerate(m.stage_items())]
+        self.banner.visible = bool(m.message)
+        self.banner_text.value = m.message or ""
+        self.banner_text.color = self.tokens["text"]
+        self.job_panel.visible = m.job is not None
+        if m.job is not None:
+            self.job_text.value = f"{m.job.name}: {m.job.text}"
+            self.job_bar.value = m.job.fraction
+            self.cancel_btn.disabled = m.job.cancelling
+        if m.screen != self.screen_name:
+            if self.screen is not None:
+                self.screen.leave()
+            self.screen_name = m.screen
+            self.screen = SCREENS[m.screen](self)
+            self.body.content = self.screen.build()
+        else:
+            self.screen.refresh()
+        self.page.update()
+
+
+def start(page: ft.Page) -> View:
+    """Set up the window and show the app. Fonts are read from the app's assets folder."""
+    page.title = "Harbium Timelapse"
+    page.padding = 0
+    page.fonts = FONTS
+    dark = page.platform_brightness != ft.Brightness.LIGHT
+
+    def brand(t: dict) -> ft.Theme:
+        # Switches, sliders, checkboxes, the presets and the dropdown all take these: bone on ink, or ink on bone.
+        return ft.Theme(font_family=BODY, color_scheme=ft.ColorScheme(
+            primary=t["text"], on_primary=t["bg"], secondary=t["text"], on_secondary=t["bg"],
+            surface=t["bg"], on_surface=t["text"], outline=t["line"], secondary_container=t["line"],
+            on_secondary_container=t["text"]))
+    page.theme, page.dark_theme = brand(LIGHT), brand(DARK)
+    page.theme_mode = ft.ThemeMode.DARK if dark else ft.ThemeMode.LIGHT
+    page.bgcolor = (DARK if dark else LIGHT)["bg"]
+
+    async def call(fn):
+        fn()
+    model = AppModel(post=lambda fn: page.run_task(call, fn))
+    return View(page, model)

@@ -162,3 +162,29 @@ def test_the_timeline_draws_and_clicks_map_to_frames():
                           steps=(5,), flags=(9,), current=12, cant_judge=(0, 1, N - 2, N - 1))
     assert img.shape == (160, 600, 3) and img.std() > 0
     assert frame_at(0, 600, N) == 0 and frame_at(600, 600, N) == N - 1 and frame_at(300, 600, N) in (9, 10)
+
+
+def test_a_folder_of_exported_frames_goes_straight_to_finishing(tmp_path):
+    sky(tmp_path / "export")
+    m = AppModel()
+    m.open_folder(tmp_path / "export")
+    m.wait()
+    assert m.next_step == ("finish", "Next: finish an export")
+    m.go("finish")
+    assert m.screen == "finish" and m.project.export == str(tmp_path / "export") and m.can_finish
+
+
+def test_presets_never_enlarge_small_frames(tmp_path):
+    sky(tmp_path / "export")                                   # 64 pixels wide
+    assert AppModel._preset_width(tmp_path / "export", 3840) == 64
+    assert AppModel._preset_width(tmp_path / "export", None) is None
+
+
+def test_an_export_only_folder_never_shows_prepare_or_grade_as_done(tmp_path):
+    sky(tmp_path / "export")
+    m = AppModel()
+    m.open_folder(tmp_path / "export")
+    m.wait()
+    m.project.reach("finished")
+    states = {s: state for s, _, state in m.stage_items()}
+    assert states["prepare"] == "locked" and states["grade"] == "locked"

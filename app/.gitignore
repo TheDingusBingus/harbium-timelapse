@@ -1,0 +1,5 @@
+# programs bundled into the app: never committed
+src/assets/bin/*
+!src/assets/bin/README.md
+build/
+.venv/

@@ -29,7 +29,7 @@ STAGE_BAR = (("folder", "Folder"), ("prepare", "Prepare"), ("grade", "Grade"), (
              ("done", "Review"))
 
 PRESETS = {
-    "share": {"label": "Share", "detail": "H.264 in 4K: plays on anything", "codec": "h264", "width": 3840,
+    "share": {"label": "Share", "detail": "H.264, up to 4K: plays on anything", "codec": "h264", "width": 3840,
               "suffix": ".mp4"},
     "master": {"label": "Master", "detail": "H.265 10-bit at full size: smoother skies, similar file size. "
                "Some PCs need Microsoft's HEVC extension to play it", "codec": "h265", "width": None,
@@ -184,8 +184,11 @@ class AppModel:
         """(screen, label, state) for the stage bar; state is current, done, open or locked."""
         done_for = {"folder": "opened", "prepare": "prepared", "grade": "exported", "finish": "finished"}
         items = []
+        no_editor = self.opened is not None and self.opened.editor is None
         for screen, label in STAGE_BAR:
-            if screen == self.screen:
+            if no_editor and screen in ("prepare", "grade"):
+                state = "locked"                       # nothing to prepare: these steps don't apply
+            elif screen == self.screen:
                 state = "current"
             elif screen in done_for and self._reached(done_for[screen]) and screen != "folder":
                 state = "done"
@@ -226,6 +229,8 @@ class AppModel:
             self._notice(project.note)
         if self.opened.editor is not None:
             project.editor = self.opened.editor.name
+        elif not project.export:
+            project.export = str(folder)                 # no editor files: these frames are the export
         if project.export:
             self.export_since = 0.0
         config.remember_project(folder, len(opened.seq), project.stage)
@@ -268,6 +273,11 @@ class AppModel:
     @property
     def window(self) -> int:
         return int(self.project.settings["window"]) if self.project else 25
+
+    @property
+    def white_balance_available(self) -> bool:
+        """Lightroom's white balance isn't supported yet, so its switch isn't shown."""
+        return self.opened is not None and self.opened.editor is not None and self.opened.editor.name != "lightroom"
 
     @property
     def white_balance(self) -> bool:
@@ -449,14 +459,28 @@ class AppModel:
         export = Path(self.project.export)
         preset = PRESETS[self.preset]
         video, fps, window = Path(self.video_path), self.fps, self.window
+        width = self._preset_width(export, preset["width"])
         frames_out = export.parent / (export.name + "-finished") if self.also_frames else None
 
         def work(t):
             planned = self.s.plan_export(export, window=window, tracker=t)
-            done = self.s.write_export(planned, out=frames_out, video=video, fps=fps, width=preset["width"],
+            done = self.s.write_export(planned, out=frames_out, video=video, fps=fps, width=width,
                                        codec=preset["codec"], settings={"window": window}, tracker=t)
             return planned, done
         self._run("Finishing", work, self._finished)
+
+    @staticmethod
+    def _preset_width(export: Path, limit: int | None) -> int | None:
+        """A preset's width is a ceiling, never a target: frames are never enlarged."""
+        if limit is None:
+            return None
+        from PIL import Image
+        from ...finish import finished_frames
+        try:
+            with Image.open(finished_frames(export)[0]) as im:
+                return min(limit, im.size[0])
+        except (OSError, ValueError, IndexError):
+            return limit
 
     def _finished(self, result) -> None:
         self.planned, self.finished = result

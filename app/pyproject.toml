@@ -1,0 +1,21 @@
+[project]
+name = "harbium-timelapse-app"
+version = "0.1.0"
+description = "Harbium Timelapse: the desktop app for harbium-timelapse"
+requires-python = ">=3.12"
+dependencies = [
+    "flet==1.0.5",
+    "numpy",
+    "pillow",
+    "rawpy",
+    "harbium-timelapse[raw] @ git+https://github.com/TheDingusBingus/harbium-timelapse",
+]
+
+[tool.flet]
+product = "Harbium Timelapse"
+company = "Harbium"
+org = "studio.harbium"
+copyright = "MIT licence"
+
+[tool.flet.app]
+path = "src"
