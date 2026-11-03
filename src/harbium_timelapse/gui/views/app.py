@@ -111,7 +111,7 @@ class StartScreen(Screen):
         ], spacing=10, width=760)
 
     async def choose(self, e):
-        folder = await self.view.picker.get_directory_path(dialog_title="Choose a folder of timelapse frames")
+        folder = await self.view.ask("get_directory_path", dialog_title="Choose a folder of timelapse frames")
         if folder:
             self.m.open_folder(folder)
 
@@ -255,7 +255,7 @@ class GradeScreen(Screen):
         self._polling = False
 
     async def choose(self, e):
-        folder = await self.view.picker.get_directory_path(dialog_title="Choose the folder of exported frames")
+        folder = await self.view.ask("get_directory_path", dialog_title="Choose the folder of exported frames")
         if folder:
             self.m.use_export(folder)
 
@@ -264,7 +264,9 @@ class FinishScreen(Screen):
     def build(self):
         ui, m = self.ui, self.m
         self.export_text = ui.text("", mono=True, size=14)
-        self.video_text = ui.text("", mono=True, size=14)
+        self.video_text = ft.TextField(value="", text_size=13, text_style=ft.TextStyle(font_family=MONO),
+                                       dense=True, width=520, border_color=ui.t["line"],
+                                       on_blur=self.typed_video, on_submit=self.typed_video)
         self.detail = ui.text("", dim=True, size=14)
         self.presets = ft.SegmentedButton(
             segments=[ft.Segment(value=k, label=ft.Text(v["label"])) for k, v in PRESETS.items()],
@@ -297,16 +299,22 @@ class FinishScreen(Screen):
         self.detail.value = PRESETS[m.preset]["detail"]
         self.go_btn.disabled = not m.can_finish
 
+    def typed_video(self, e):
+        text = (e.control.value or "").strip().strip('"')
+        if text:
+            self.m.set_video_path(Path(text).with_suffix(PRESETS[self.m.preset]["suffix"]))
+
     async def choose_export(self, e):
-        folder = await self.view.picker.get_directory_path(dialog_title="Choose the folder of exported frames")
+        folder = await self.view.ask("get_directory_path", dialog_title="Choose the folder of exported frames")
         if folder:
             self.m.use_export(folder)
 
     async def choose_video(self, e):
         current = Path(self.m.video_path) if self.m.video_path else None
-        path = await self.view.picker.save_file(
-            dialog_title="Save the video as", file_name=current.name if current else None,
+        path = await self.view.ask(
+            "save_file", dialog_title="Save the video as", file_name=current.name if current else None,
             initial_directory=str(current.parent) if current else None,
+            file_type=ft.FilePickerFileType.CUSTOM,              # allowed_extensions only works with CUSTOM
             allowed_extensions=[PRESETS[self.m.preset]["suffix"].lstrip(".")])
         if path:
             self.m.set_video_path(Path(path).with_suffix(PRESETS[self.m.preset]["suffix"]))
@@ -364,6 +372,22 @@ class View:
         self._build_shell()
         model.subscribe(self.refresh)
         self.refresh()
+
+    async def ask(self, method: str, **kwargs):
+        """Open a file dialog. If the window doesn't answer (Flet 1.0 sometimes loses track of a
+        long-lived picker: "Timeout waiting for invoke method listener"), try once more with a fresh
+        picker, as Flet's own examples do; if that fails too, say so plainly instead of crashing."""
+        last = None
+        for picker in (self.picker, None):
+            try:
+                return await getattr(picker or ft.FilePicker(), method)(**kwargs)
+            except Exception as e:                       # noqa: BLE001 - any failure here is the dialog's
+                last = e
+        self.model._notice("The file dialog didn't open, so nothing was changed. "
+                           + ("You can type the path into the box instead. " if method == "save_file" else "")
+                           + f"(Flet said: {str(last)[:160]})", "error")
+        self.model.changed()
+        return None
 
     def _build_shell(self):
         ui, t = self.ui, self.tokens
