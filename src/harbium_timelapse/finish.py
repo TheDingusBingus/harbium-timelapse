@@ -52,7 +52,8 @@ from .sequencer import _natural_key
 Progress = Callable[[int, int], None]
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 JPEG_QUALITY = 95
-DITHER_BAND = 256        # rows dithered at a time
+DITHER_BAND = 256        # rows corrected at a time (each band can go to its own thread)
+CORRECT_THREADS = max(1, min(8, (os.cpu_count() or 1)))
 
 
 def finished_frames(folder: Path | str) -> list[Path]:
@@ -432,21 +433,38 @@ def correct(img: np.ndarray, gains_stops, out_dtype=None, dither: bool = False, 
         for c in range(len(gains), img.shape[-1]):
             out[..., c] = identity[img[..., c]]
     linear = _srgb_to_linear(np.arange(in_levels + 1, dtype=np.float64) / in_levels)
-    rng = np.random.default_rng(seed) if dither else None
+    tables = []
     for c, g in enumerate(gains):
-        channel = img[..., c]
         if g == 0 and out_dtype == img.dtype:
-            continue                                    # nothing to change: leave it exactly as it was
-        exact = _linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * out_levels
-        if rng is None or out_levels > 255:
-            out[..., c] = np.round(exact).astype(out_dtype)[channel]
+            tables.append(None)                          # nothing to change: leave it exactly as it was
             continue
-        exact = exact.astype(np.float32)
-        for top in range(0, channel.shape[0], DITHER_BAND):          # in bands, so memory stays small
-            values = exact[channel[top:top + DITHER_BAND]]
-            values += rng.random(values.shape, dtype=np.float32)
-            values -= rng.random(values.shape, dtype=np.float32)
-            out[top:top + DITHER_BAND, :, c] = np.clip(np.rint(values), 0, 255).astype(np.uint8)
+        exact = _linear_to_srgb(np.clip(linear * 2.0 ** float(g), 0.0, 1.0)) * out_levels
+        tables.append(np.round(exact).astype(out_dtype) if not dither or out_levels > 255
+                      else exact.astype(np.float32))
+
+    def band(index: int, top: int, bottom: int) -> None:
+        # Each band of rows on its own thread: table lookups, noise and rounding all run outside Python's
+        # lock, so the bands really are corrected side by side. Each band's noise has its own seed, so
+        # the result is the same however many threads there are.
+        noise = np.random.default_rng([seed, index]) if dither else None
+        for c, table in enumerate(tables):
+            if table is None:
+                continue
+            values = np.take(table, img[top:bottom, :, c])
+            if table.dtype == np.float32:
+                values += noise.random(values.shape, dtype=np.float32)
+                values -= noise.random(values.shape, dtype=np.float32)
+                values = np.clip(np.rint(values), 0, 255).astype(np.uint8)
+            out[top:bottom, :, c] = values
+
+    rows = img.shape[0]
+    bands = [(i, top, min(rows, top + DITHER_BAND)) for i, top in enumerate(range(0, rows, DITHER_BAND))]
+    if len(bands) > 1 and CORRECT_THREADS > 1:
+        with ThreadPoolExecutor(CORRECT_THREADS) as pool:
+            list(pool.map(lambda b: band(*b), bands))
+    else:
+        for b in bands:
+            band(*b)
     return out
 
 
