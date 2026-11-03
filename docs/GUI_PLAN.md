@@ -1082,6 +1082,12 @@ Done when: you can go from folder to finished video for the dusk sequence withou
 
 ### Phase 3: review
 
+**Live preview of the correction** (James, November 2026: "one of the most important aspects"). Every correction is a gain per colour channel per frame, so the app keeps small preview copies of the frames and re-applies the plan to them as the smoothness slider moves (about 2 ms a frame through a lookup table; re-planning under 10 ms). Shown as: before/after with a draggable wipe, a loop of about a second either side of the cursor that plays continuously while adjusting, and full playback with frame dropping on slower machines. At Prepare, previews come from the RAW measuring copies (the correction is accurate, the grade isn't applied yet); at Finish they come from the exported frames with exactly the gains the export applies.
+
+**The time strip.** One narrow, horizontally averaged slice (about 1% of the width) from every frame, laid side by side: left to right is time, so real light changes read as gradients and flicker as vertical stripes. Before and after are stacked and line up frame for frame with the timeline; clicking a stripe opens that frame. The slice position defaults to the centre and can be set by clicking a spot on a frame. It updates live with the slider (each column takes its frame's gain). `finish` builds it at full resolution while reading the frames anyway and saves it as a full-detail image (PNG, or 16-bit TIFF) beside the run report, for viewing large; in the app it can be zoomed and panned. At Prepare it's built from the RAW measuring copies, at lower resolution.
+
+The rest of Phase 3, as planned:
+
 The full timeline with layers and flags, the frame viewer with before/after and blink, "looks fine", the smoothness slider with instant redraw, apply changes, the preview player, keyboard shortcuts.
 
 Done when: first round of usability sessions, and the issues found are fixed.
