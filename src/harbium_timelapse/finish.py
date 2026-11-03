@@ -62,7 +62,8 @@ def finished_frames(folder: Path | str) -> list[Path]:
     if not folder.is_dir():
         raise ValueError(f"Can't find a folder at {folder}")
     frames = [p for p in folder.iterdir()
-              if p.is_file() and p.suffix.lower() in RENDERABLE and not p.name.startswith(".")]
+              if p.is_file() and p.suffix.lower() in RENDERABLE and not p.name.startswith(".")
+              and ".timelapse-strip" not in p.name]                  # a time strip is never a frame
     frames.sort(key=_natural_key)
     if len(frames) < 3:
         raise ValueError(f"Found {len(frames)} frames (JPEG, PNG or TIFF) in {folder}: need at least 3.")
@@ -199,6 +200,49 @@ CODECS = {
 }
 
 
+STRIP_BAND = 0.01            # each frame's slice: this share of the width, averaged across
+STRIP_WIDTH = 2400           # aim for a strip about this wide (each frame gets a whole number of pixels)
+
+
+def strip_column(img: np.ndarray, x: float = 0.5, band: float = STRIP_BAND) -> np.ndarray:
+    """One frame's column of the time strip: a narrow vertical band around ``x`` (0 = left, 1 = right),
+    averaged across in linear light, so the column is the band's true average (height x 3, linear)."""
+    lut = _srgb_to_linear(np.arange(_levels(img) + 1, dtype=np.float64) / _levels(img)).astype(np.float32)
+    w = img.shape[1]
+    half = max(1, int(round(w * band / 2)))
+    centre = int(round(min(max(x, 0.0), 1.0) * (w - 1)))
+    a, b = max(0, centre - half), min(w, centre + half)
+    return np.take(lut, img[:, a:b, :3]).mean(axis=1, dtype=np.float64).astype(np.float32)
+
+
+def render_strip(before: list[np.ndarray], after: list[np.ndarray] | None = None, stripe: int | None = None,
+                 height: int | None = None) -> np.ndarray:
+    """The time strip as an 8-bit image: left to right is time, one stripe per frame. Real changes in the light
+    read as gradients; flicker reads as vertical stripes. With ``after``, Before and After are stacked and
+    labelled. ``height``: scale each half to this many pixels (for a quick view); None keeps full detail."""
+    from PIL import Image, ImageDraw
+    n = len(before)
+    stripe = stripe or max(1, min(8, STRIP_WIDTH // max(n, 1)))
+
+    def half(columns):
+        arr = np.stack(columns, axis=1)                                # height x frames x 3, linear
+        img = np.round(_linear_to_srgb(np.clip(arr, 0, 1)) * 255).astype(np.uint8)
+        img = np.repeat(img, stripe, axis=1)
+        if height is not None and height < img.shape[0]:
+            img = np.asarray(Image.fromarray(img).resize((img.shape[1], height), Image.LANCZOS))
+        return img
+    top = half(before)
+    if after is None:
+        return top
+    bottom = half(after)
+    gap = np.full((28, top.shape[1], 3), 128, np.uint8)               # neutral grey, never tinted
+    out = Image.fromarray(np.vstack([gap, top, gap, bottom]))
+    d = ImageDraw.Draw(out)
+    d.text((6, 8), "Before", fill=(255, 255, 255))
+    d.text((6, 8 + 28 + top.shape[0]), "After", fill=(255, 255, 255))
+    return np.asarray(out)
+
+
 def check_output_path(path: Path | str) -> None:
     """Refuse a path containing "…": it's almost certainly a shortened example copied from instructions
     (Windows happily makes a folder called "…" at the top of the drive)."""
@@ -323,7 +367,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                  progress: Progress | None = None, fmt: str | None = None,
                  codec: str = "h264", dither: bool = True, meter: "Meter | None" = None,
                  finalising: Callable[[], None] | None = None, timings: dict | None = None,
-                 options: "VideoOptions | None" = None, jpeg_quality: int = JPEG_QUALITY) -> list[Path]:
+                 options: "VideoOptions | None" = None, jpeg_quality: int = JPEG_QUALITY,
+                 strip: dict | None = None) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -453,6 +498,10 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 encoder.write(frame)
                 spent["correct"] += t1 - t0
                 spent["encode"] += clock() - t1
+            if strip is not None:                       # the time strip: a narrow slice of each frame, before and after
+                x = strip.get("x", 0.5)
+                strip.setdefault("before", []).append(strip_column(img, x))
+                strip.setdefault("after", []).append(strip_column(fixed if fixed is not None else frame, x))
             if checker is not None:
                 if checked is not None:
                     spent["check"] += checked.result()          # the previous frame's check, done meanwhile

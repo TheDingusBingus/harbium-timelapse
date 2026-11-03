@@ -17,7 +17,7 @@ from .. import measure_cache
 from .. import report as run_report
 from ..editors import detect
 from ..editors.base import Editor, PrepareReport
-from ..finish import (JPEG_QUALITY, LUMA, FinishPlan, Meter, VideoOptions, _wobble, apply_finish,
+from ..finish import (JPEG_QUALITY, LUMA, FinishPlan, Meter, VideoOptions, _wobble, apply_finish, render_strip,
                       check_video_target, finished_frames, measure_channels, plan_finish)
 from ..measure import measure_brightness
 from ..progress import Tracker
@@ -164,6 +164,8 @@ class Finished:
     report: Path | None
     video: Path | None
     timings: dict = field(default_factory=dict)
+    strip: Path | None = None              # the time strip, full detail, beside the report
+    strip_columns: dict = field(default_factory=dict)
 
     @property
     def where_the_time_went(self) -> str:
@@ -219,7 +221,8 @@ def plan_export(folder: Path, window: int = 25, colour: bool = True, tracker: Tr
 def write_export(planned: Planned, out: Path | None = None, video: Path | None = None, fps: float = 24,
                  width: int | None = None, codec: str = "h264", dither: bool = True, fmt: str | None = None,
                  settings: dict | None = None, tracker: Tracker | None = None, options: VideoOptions | None = None,
-                 jpeg_quality: int = JPEG_QUALITY, first: int | None = None, last: int | None = None) -> Finished:
+                 jpeg_quality: int = JPEG_QUALITY, first: int | None = None, last: int | None = None,
+                 strip_x: float = 0.5) -> Finished:
     """Write corrected frames and/or the video, check them, review them, and save the run report.
     ``first``/``last`` (1-based) trim what's written; the smoothing still comes from the whole sequence."""
     if options is not None:
@@ -232,9 +235,10 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                           planned.motion)
     after = Meter()
     timings: dict = {}
+    columns: dict = {"x": strip_x}
     began = time.perf_counter()
     written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width, options=options,
-                           jpeg_quality=jpeg_quality,
+                           jpeg_quality=jpeg_quality, strip=columns,
                            progress=tracker.stage("Writing") if tracker else None, fmt=fmt, codec=codec,
                            dither=dither, meter=after,
                            finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None,
@@ -244,6 +248,14 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     check = after.series()
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")
+    # Beside the frames folder, never in it: image-sequence importers (and finish itself) would take it for a frame.
+    strip_path = (Path(out).parent / (Path(out).name + ".timelapse-strip.png") if out else
+                  Path(video).with_name(Path(video).stem + ".timelapse-strip.png"))
+    try:
+        from PIL import Image
+        Image.fromarray(render_strip(columns["before"], columns["after"])).save(strip_path, optimize=False)
+    except (OSError, KeyError, ValueError):
+        strip_path = None
     settings = {"measure": "regional-vote-1", "codec": codec if video else None, "dither": dither,
                 "video": None if not video or options is None else
                 {"pix_fmt": options.pix_fmt, "quality": options.quality, "prores_profile": options.prores_profile},
@@ -251,11 +263,12 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                 "fps": fps, "width": width, **(settings or {}),
                 "seconds": {k: round(v, 2) for k, v in timings.items() if k not in ("bytes", "frames")},
                 "seconds_per_frame": round(timings["elapsed"] / max(1, timings["frames"]), 3),
-                "bytes_read": timings.get("bytes", 0)}
+                "bytes_read": timings.get("bytes", 0),
+                "strip": strip_path.name if strip_path else None, "strip_x": strip_x}
     try:
         saved = run_report.write(run_report.finish_report(planned.plan, written if out else None, settings, check,
                                                           findings, planned.motion,
                                                           where=Path(out) if out else Path(video).parent), where)
     except OSError:
         saved = None
-    return Finished(written, check, findings, saved, Path(video) if video else None, timings)
+    return Finished(written, check, findings, saved, Path(video) if video else None, timings, strip_path, columns)

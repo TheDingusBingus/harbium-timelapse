@@ -476,9 +476,44 @@ class DoneScreen(Screen):
                              ft.Row([ui.secondary("Show in folder", lambda e: open_path(video, select=True)),
                                      ui.primary("Play video", lambda e: open_path(video))], spacing=10)],
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True)) if video else ft.Container(),
+            *self._strip(),
             ui.text("Worth a look", size=14), self.flags,
             ft.Row([ui.secondary("Open another folder", lambda e: m.go("start"))]),
         ], spacing=14, width=900)
+
+    def _strip(self) -> list:
+        """The time strip: a quick-to-load view to zoom and pan, and the full-detail file a click away."""
+        ui, m = self.ui, self.m
+        path = m.finished.strip
+        if not path or not m.finished.strip_columns.get("before"):
+            return []
+        self.strip_view = ft.Image(src=b"", width=880, fit=ft.BoxFit.CONTAIN)
+        self.view.page.run_task(self._load_strip)
+        return [ui.text("Time strip", size=14),
+                ui.text("Each thin stripe is one frame, left to right through the sequence. Flicker shows as "
+                        "vertical stripes in Before; After should run smoothly. Scroll to zoom, drag to look around.",
+                        dim=True, size=13),
+                ft.Container(ft.InteractiveViewer(content=self.strip_view, min_scale=1, max_scale=12,
+                                                  boundary_margin=ft.Margin.all(40)),
+                             bgcolor=ui.t["surround"], padding=8, border_radius=2, width=896, height=420,
+                             clip_behavior=ft.ClipBehavior.HARD_EDGE),
+                ft.Row([ui.secondary("Open full size", lambda e: open_path(path)),
+                        ui.secondary("Show in folder", lambda e: open_path(path, select=True)),
+                        ui.text(path.name, dim=True, mono=True, size=13)], spacing=10)]
+
+    async def _load_strip(self):
+        import io
+        from PIL import Image
+        from ...finish import render_strip
+        cols = self.m.finished.strip_columns
+
+        def make() -> bytes:
+            img = render_strip(cols["before"], cols["after"], height=180)
+            buf = io.BytesIO()
+            Image.fromarray(img).save(buf, format="PNG")
+            return buf.getvalue()
+        self.strip_view.src = await asyncio.to_thread(make)
+        self.view.page.update()
 
     def refresh(self):
         ui, m = self.ui, self.m
