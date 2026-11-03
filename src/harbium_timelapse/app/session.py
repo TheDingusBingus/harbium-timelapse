@@ -240,7 +240,7 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                  width: int | None = None, codec: str = "h264", dither: bool = True, fmt: str | None = None,
                  settings: dict | None = None, tracker: Tracker | None = None, options: VideoOptions | None = None,
                  jpeg_quality: int = JPEG_QUALITY, first: int | None = None, last: int | None = None,
-                 strip_x: float = 0.5) -> Finished:
+                 strip_x: float = 0.5, slice_mode: str = "left-right") -> Finished:
     """Write corrected frames and/or the video, check them, review them, and save the run report.
     ``first``/``last`` (1-based) trim what's written; the smoothing still comes from the whole sequence."""
     if options is not None:
@@ -253,7 +253,7 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
                           planned.motion)
     after = Meter()
     timings: dict = {}
-    columns: dict = {"x": strip_x}
+    columns: dict = {"x": strip_x, "mode": slice_mode}
     began = time.perf_counter()
     written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width, options=options,
                            jpeg_quality=jpeg_quality, strip=columns,
@@ -273,7 +273,7 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     try:
         from PIL import Image
         from ..timeslice import stack, to_8bit
-        picture = stack(to_8bit(columns["slice_before"]), to_8bit(columns["slice_after"]))
+        picture = stack(to_8bit(columns["slice_before"].picture()), to_8bit(columns["slice_after"].picture()))
         Image.fromarray(picture).save(strip_path, quality=93)
     except (OSError, KeyError, ValueError):
         strip_path = None

@@ -503,14 +503,13 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 x = strip.get("x", 0.5)                 # the diagnostic strip: one narrow slice of every frame
                 strip.setdefault("before", []).append(strip_column(img, x))
                 strip.setdefault("after", []).append(strip_column(corrected, x))
-                if "slice_before" not in strip:         # the time slice: this frame's own band of the picture
-                    from .timeslice import bands
-                    strip["slice_bands"] = bands(img.shape[1], len(plan.frames))
-                    strip["slice_before"] = np.empty(img.shape[:2] + (3,), img.dtype)
-                    strip["slice_after"] = np.empty(corrected.shape[:2] + (3,), corrected.dtype)
-                a, b = strip["slice_bands"][i]
-                strip["slice_before"][:, a:b] = img[:, a:b, :3]
-                strip["slice_after"][:, a:b] = corrected[:, a:b, :3]
+                if "slice_before" not in strip:         # the time slice: each frame hands over its own pixels
+                    from .timeslice import Slice
+                    mode, n = strip.get("mode", "left-right"), len(plan.frames)
+                    strip["slice_before"] = Slice(*img.shape[:2], n, mode, dtype=img.dtype)
+                    strip["slice_after"] = Slice(*corrected.shape[:2], n, mode, dtype=corrected.dtype)
+                strip["slice_before"].take(i, img)
+                strip["slice_after"].take(i, corrected)
             if checker is not None:
                 if checked is not None:
                     spent["check"] += checked.result()          # the previous frame's check, done meanwhile
@@ -743,7 +742,11 @@ class _Encoder:
         # Convert to video colour with the HD formula (BT.709) and say so in the file. ffmpeg's default is
         # the standard-definition formula, unlabelled, which players showing HD or 4K decode as BT.709:
         # colours came out slightly shifted, greens and reds most.
-        convert = f"{scale}:out_color_matrix=bt709:out_range=tv,format={opts.pix_fmt}"
+        # The labels are also set on the frames themselves (setparams): from ffmpeg 7.1, colour properties are
+        # negotiated through the filters and override the encoder options, so without this, newer versions
+        # wrote some of them as "unknown".
+        convert = (f"{scale}:out_color_matrix=bt709:out_range=tv,format={opts.pix_fmt},"
+                   "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709")
         tags = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
         self.process = subprocess.Popen(
             [ffmpeg(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", pix,

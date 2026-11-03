@@ -52,15 +52,34 @@ def test_missing_previews_are_made_once(tmp_path):
     assert session.ensure_previews(seq) == len(seq) and session.ensure_previews(seq) == 0
 
 
-def test_the_app_time_slice_follows_the_corrections(tmp_path):
+def test_the_app_time_slice_follows_the_corrections_in_every_mode(tmp_path):
     import types
     from harbium_timelapse.gui.models import AppModel
-    m = AppModel()
+    from harbium_timelapse.timeslice import MODES, Slice
     rng = np.random.default_rng(3)
     scene = np.linspace(0.05, 0.6, 120)[None, :, None] * np.ones((30, 1, 3))
     wobble = rng.normal(0, 0.2, 24)
-    m.preview_images = [(scene * 2 ** w).astype(np.float32) for w in wobble]
+    images = [(scene * 2 ** w).astype(np.float32) for w in wobble]
+    m = AppModel()
+    m.project = types.SimpleNamespace(settings={}, save=lambda: None)
+    slices = {mode: Slice(30, 120, 24, mode) for mode in MODES}
+    for i, img in enumerate(images):
+        for s in slices.values():
+            s.take(i, img)
+    m.preview_images, m._slice_scale = slices, 1.0
     m.preview = types.SimpleNamespace(deflicker=types.SimpleNamespace(exposure=-wobble))
-    before, after = m.time_slice()
-    assert before.shape == after.shape == (30, 120, 3) and before.std(axis=1).mean() > after.std(axis=1).mean()
-    assert m.time_slice()[0] is before                                    # recomposed only when corrections change
+    for mode in MODES:
+        m.set_slice_mode(mode)
+        before, after = m.time_slice()
+        flat = scene.mean(axis=2)[None] * 255
+        lin = lambda img: img.astype(float).mean(axis=2)                     # noqa: E731
+        assert before.shape == (30, 120, 3)
+        # after the correction, every pixel matches its frame-0-free scene value: the flicker is gone everywhere
+        assert np.std(np.log2(lin(after) + 1) - np.log2(flat[0] + 1)) < np.std(np.log2(lin(before) + 1) - np.log2(flat[0] + 1))
+    assert m.time_slice()[0] is m.time_slice()[0]                         # recomposed only when something changes
+
+
+def test_a_slice_keeps_one_pictures_worth_of_pixels_however_long_the_sequence():
+    from harbium_timelapse.timeslice import Slice
+    s = Slice(30, 40, 2000, "clockwise")
+    assert s.values.shape == (30 * 40, 3)

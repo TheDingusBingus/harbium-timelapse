@@ -327,16 +327,34 @@ class AppModel:
         from ...app import previews
 
         def work(t):
+            from ...timeslice import MODES, Slice
             self.s.ensure_previews(seq, t)
-            images = [previews.load(f.path) for f in seq]
-            return None if any(i is None for i in images) else images
+            slices, means = None, []
+            for i, f in enumerate(seq):           # each preview hands its own pixels to every mode, then goes
+                image = previews.load(f.path)
+                if image is None:
+                    return None
+                if slices is None:
+                    h, w = image.shape[:2]
+                    slices = {mode: Slice(h, w, len(seq), mode) for mode in MODES}
+                if image.shape[:2] != (slices["left-right"].h, slices["left-right"].w):
+                    return None                   # previews of different sizes: can't make one picture
+                for s in slices.values():
+                    s.take(i, image)
+                means.append(float(image.mean()))
+            return slices, means
 
         def event(e):
             if isinstance(e, Progress):
                 self.preview_status = f"Making previews {e.done} of {e.total} (once for this folder)"
             elif isinstance(e, Done):
-                self.preview_images = e.result
-                self.preview_status = "" if e.result is not None else "Previews couldn't be made for every frame."
+                if e.result is None:
+                    self.preview_status = "Previews couldn't be made for every frame."
+                else:
+                    self.preview_images, means = e.result
+                    typical = float(np.median([m for m in means if m > 0] or [1.0]))
+                    self._slice_scale = 0.18 / typical
+                    self.preview_status = ""
             elif isinstance(e, Failed):
                 self.preview_status = f"Previews couldn't be made: {e.message}"
             self.changed()
@@ -348,16 +366,24 @@ class AppModel:
         one band per frame is recomposed when the corrections change."""
         if self.preview_images is None or self.preview is None or self.preview.deflicker is None:
             return None
-        key = id(self.preview)
+        key = (id(self.preview), self.slice_mode)
         if self._slice is None or self._slice[0] != key:
-            from ...timeslice import compose, display_scale, to_display
-            images = self.preview_images
-            if not hasattr(self, "_slice_scale") or self._slice_scale[0] != id(images):
-                self._slice_scale = (id(images), display_scale(images))
-            scale = self._slice_scale[1]
+            from ...timeslice import to_display
+            s = self.preview_images[self.slice_mode]
             stops = np.nan_to_num(np.asarray(self.preview.deflicker.exposure, dtype=np.float64))
-            self._slice = (key, to_display(compose(images), scale), to_display(compose(images, stops), scale))
+            self._slice = (key, to_display(s.picture(), self._slice_scale), to_display(s.picture(stops), self._slice_scale))
         return self._slice[1], self._slice[2]
+
+    @property
+    def slice_mode(self) -> str:
+        return (self.project.settings.get("slice_mode") if self.project else None) or "left-right"
+
+    def set_slice_mode(self, mode: str) -> None:
+        from ...timeslice import MODES
+        if mode in MODES and self.project is not None:
+            self.project.settings["slice_mode"] = mode
+            self.project.save()
+            self.changed()
 
     def set_window(self, window: int) -> None:
         self.project.settings["window"] = int(window)
@@ -688,12 +714,12 @@ class AppModel:
         video = Path(s.video_path) if s.video else None
         frames_out = Path(s.frames_folder) if s.frames else None
         width = self._preset_width(export, s.width_limit()) if s.video else None
-        options, window = s.options(), self.window
+        options, window, mode = s.options(), self.window, self.slice_mode
         fmt = s.frames_format if s.frames else None
 
         def work(t):
             planned = self.s.plan_export(export, window=window, tracker=t)
-            done = self.s.write_export(planned, out=frames_out, video=video, fps=s.fps, width=width,
+            done = self.s.write_export(planned, out=frames_out, video=video, fps=s.fps, width=width, slice_mode=mode,
                                        codec=s.codec, dither=s.dither, fmt=fmt, options=options,
                                        jpeg_quality=s.jpeg_quality, first=s.first, last=s.last,
                                        settings={"window": window, "preset": s.preset}, tracker=t)

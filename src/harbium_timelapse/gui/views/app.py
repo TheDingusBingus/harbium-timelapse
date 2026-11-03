@@ -116,8 +116,12 @@ class SlicePanel:
     def control(self) -> ft.Control:
         ui = self.ui
         side = lambda label, image: ft.Column([ui.text(label, size=13), image], spacing=4)   # noqa: E731
+        from ...timeslice import MODES
+        chooser = ft.Dropdown(options=[ft.DropdownOption(key=k, text=t) for k, t in MODES.items()],
+                              value=self.m.slice_mode, width=230, dense=True,
+                              on_select=lambda e: self.m.set_slice_mode(e.control.value))
         return ft.Container(ui.panel(ft.Column(
-            [ui.text("Time slice: the scene with time running left to right", dim=True, size=13),
+            [ft.Row([ui.text("Time slice: the scene, with time running", dim=True, size=13), chooser], spacing=8),
              ui.text(self.words, dim=True, size=12), self.status,
              ft.Container(ft.Row([side("Before", self.before), side("After", self.after)], spacing=8),
                           bgcolor=ui.t["surround"], padding=6, border_radius=2)], spacing=6), padding=12),
@@ -238,8 +242,8 @@ class PrepareScreen(Screen):
                  ft.Row([ui.secondary("Undo", lambda e: m.undo()), self.apply_btn], spacing=10)]
         self._drawn = None
         self.refresh()
-        self.slice = SlicePanel(self, "Each frame gives one band. A frame that jumps shows as a band lighter or "
-                                      "darker than its neighbours; after the corrections the bands should fade "
+        self.slice = SlicePanel(self, "Each frame gives one part of the picture (a band, ring or wedge). A frame that jumps shows "
+                                      "lighter or darker than its neighbours; after the corrections it should all fade "
                                       "smoothly. A rough guide from the RAW files, before your grade.")
         self.slice.refresh()
         return ft.Row([ft.Column(side, spacing=12, width=380),
@@ -567,7 +571,7 @@ class DoneScreen(Screen):
 
         def make() -> bytes:
             from ...timeslice import stack, to_8bit
-            img = Image.fromarray(stack(to_8bit(cols["slice_before"]), to_8bit(cols["slice_after"])))
+            img = Image.fromarray(stack(to_8bit(cols["slice_before"].picture()), to_8bit(cols["slice_after"].picture())))
             img.thumbnail((1760, 2400))
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=88)
