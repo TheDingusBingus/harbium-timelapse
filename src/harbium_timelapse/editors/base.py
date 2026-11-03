@@ -66,9 +66,11 @@ class Editor:
 
     def prepare(self, seq: Sequence, *, window: int, strength: float = 1.0,
                 white_balance: bool = True, dry_run: bool = False, force: bool = False,
-                progress=None) -> PrepareReport:
+                progress=None, raw_brightness=None) -> PrepareReport:
         """Steady the white balance (if the editor allows) and deflicker, by
-        writing into the editor's edit files. ``dry_run`` writes nothing."""
+        writing into the editor's edit files. ``dry_run`` writes nothing.
+        ``raw_brightness``: measurements already taken (``measure_brightness``),
+        so a preview and the apply that follows don't each read every RAW file."""
         raise NotImplementedError
 
     def handoff_steps(self) -> list[str]:

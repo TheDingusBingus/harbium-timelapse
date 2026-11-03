@@ -1039,7 +1039,22 @@ Progress events and cancelling; the run report; the spike check (including "can'
 
 Done when: all tests pass, `finish` writes a report, and your dusk sequence's review comes back clean.
 
-### Phase 1: experiments to prove Flet (about a week)
+### Phase 1: experiments to prove Flet — passed, 20 October 2026
+
+Run on James's PC (Windows 11, 20 cores, 34 GB) with `experiments/flet-check`, from source and as a packaged app (Flet 1.0.5, Python 3.14 inside the app):
+
+| | Packaged result | Target |
+|---|---|---|
+| S1 packaging | Bundled ExifTool 13.59 and ffmpeg 9.0.2 run from the app's folder; R6 CR3 settings read and decoded; video made | Works with no Python installed |
+| S2 workers | Parallel decoding inside the packaged app, no extra windows; a forced stop stops (exit −15) | Workers or threads |
+| S3 frames | `RawImage` 960×640 confirmed on screen: median 9.1 ms, worst 13.5 ms | Under 100 ms |
+| S4 timeline | Re-plan 8 ms; app-drawn timeline on screen 19 ms (flet-charts update 164 ms) | Under 150 ms |
+| S5 playback | James's own 229 frames at 24.0 fps, 0 late | Smooth at 24 |
+| S6 | Keys arrive; no listening network ports in the packaged app (from source: one, loopback only) | No listening port |
+
+Decision: go with Flet (ADR-001 accepted). The timeline is drawn by the app itself and shown with `RawImage` (ADR-006). S4 first failed: the frame-by-frame smoother (127 ms for 2,000 frames) and a slider that queued every movement made re-planning take 5 s; the smoother now runs all frames at once with numpy (identical answers, about 100x faster) and the slider only ever plans its latest position. Still to run: the minimum machine (James's laptop), Narrator, and drag-and-drop via a community extension.
+
+The experiments as planned:
 
 | | Experiment | Passes when |
 |---|---|---|
@@ -1057,6 +1072,8 @@ S2 to S5 run on both reference machines (section 7). For the minimum machine, an
 **Decision gate:** go with Flet if S1 and S2 pass (S2 with either workers or threads) and S3 and S4 meet their budgets. Otherwise, the same experiments with PySide6, then decide. S3 to S5 must meet the minimum-machine targets (QR-16) too, with adapting switched on. S7 and S8 don't affect the framework choice; they set defaults.
 
 ### Phase 2: the first working app
+
+Progress: step 1 of 4 done (app services: `app/config.py`, `app/project.py`, `app/jobs.py`, `app/session.py`; the command line's `finish` now runs on the same session steps). Jobs run on a thread with cooperative cancel for now: the heavy decoding already runs in worker processes, and a job in its own process (ADR-003) is kept for when a job type needs a forced stop.
 
 Start screen, project overview with the folder check, prepare with preview and apply, hand-off, finish, progress and cancel throughout, undo, recovery. Simple timeline (measured and curve).
 
@@ -1165,3 +1182,13 @@ Second usability round, light theme, Mac and Linux out of "experimental" once co
 **Decision.** Make 960-pixel JPEG copies once, cache them by file stamp, and use them for the viewer, filmstrip and player. Full-size files are only read to measure and to write.
 
 **Consequences.** Easier: fast scrubbing and playback, bounded memory. Harder: a cache to manage (size limit, clearing) and a delay the first time a folder is opened, shown as a background job. Revisit if people need to inspect frames at 100% (add a "view full size" that loads one frame on demand).
+
+### ADR-006: the app draws its own timeline
+
+**Status:** Accepted, from experiment S4.
+
+**Context.** The timeline is the app's centrepiece and must redraw as the smoothness slider moves. The flet-charts extension took 164 ms to update a 2,000-point chart in the packaged app and doesn't appear at all when running from source (`flet run` uses a ready-made window without it).
+
+**Decision.** Draw the timeline as an image in Python (Pillow) and show it with `RawImage`: 19 ms to screen in the packaged app, works everywhere, and gives full control of the light-meter look in section 9.
+
+**Consequences.** Easier: speed, consistent look, no extension to keep in step with Flet. Harder: hover tooltips and clicks on the chart are ours to implement (a click becomes a frame number from its x position). Revisit if interaction needs outgrow that.

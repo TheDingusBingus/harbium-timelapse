@@ -164,3 +164,19 @@ def test_editors_give_their_own_handoff_steps():
     from harbium_timelapse.editors.rapidraw.adapter import RapidRAW
     assert any("Dehaze" in s for s in RapidRAW().handoff_steps())
     assert any("Read Metadata from Files" in s for s in Lightroom().handoff_steps())
+
+
+def test_a_plain_sky_never_raises_a_false_moving_camera_warning(tmp_path):
+    """Regression: featureless frames (plain sky, fog) used to look like a moving camera."""
+    folder = tmp_path / "sky"
+    folder.mkdir()
+    rng = np.random.default_rng(2)
+    base = np.linspace(40, 200, 180)[None, :, None] * np.ones((120, 1, 3))
+    paths = []
+    for i in range(30):
+        p = folder / f"f{i:02d}.png"
+        Image.fromarray(np.clip(base + rng.normal(0, 2, base.shape), 0, 255).astype(np.uint8)).save(p)
+        paths.append(p)
+    meter = Meter(motion=True)
+    measure_channels(paths, meter=meter)
+    assert moving_camera_note(meter.motion()) is None

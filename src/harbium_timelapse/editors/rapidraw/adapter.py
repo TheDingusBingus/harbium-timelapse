@@ -30,7 +30,7 @@ class RapidRAW(Editor):
 
     def prepare(self, seq, *, window: int = DEFAULT_WINDOW, strength: float = 1.0,
                 white_balance: bool = True, dry_run: bool = False, force: bool = False,
-                progress=None) -> PrepareReport:
+                progress=None, raw_brightness=None) -> PrepareReport:
         report = PrepareReport(editor=self.label, frames=len(seq), dry_run=dry_run)
         report.problems = check(seq)
         blocking = [p for p in report.problems if p.kind in BLOCKING]
@@ -51,7 +51,7 @@ class RapidRAW(Editor):
             except ValueError as e:
                 report.notes.append(f"White balance left as it is: {e}")
 
-        p = plan(seq, window=window, strength=strength, progress=progress)
+        p = plan(seq, window=window, strength=strength, progress=progress, raw_brightness=raw_brightness)
         report.deflicker = p.flicker
         if not dry_run:
             report.changed = apply(p)

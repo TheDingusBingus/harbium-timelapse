@@ -290,3 +290,14 @@ New modules: `progress.py` (Progress, Cancelled, CancelToken, Tracker: wraps the
 `finish.Meter`: incremental measurement (profiles + three SteadyChains, optional motion); `measure_channels(..., meter=)`; `apply_finish(..., meter=)` measures corrected frames in memory (self-check no longer re-reads output; identical to reading lossless output back, tested). Video encoded to `<name>.partial<ext>`, renamed on success, deleted on failure or cancel. `Problem.fix` (filled from `types.FIXES` when the message doesn't already say). `Editor.handoff_steps()` with RapidRAW and Lightroom versions. CLI: `timelapse review FOLDER [--json]`; `finish` prints findings one line per frame and writes `timelapse-report.json` (in `--out`, or `<video>.timelapse-report.json`).
 
 Real check: review of the finished dusk film (web copy) flags 5 of 229 frames, top one frame 81, the ND turn (0.05 stops darker, slightly warmer): the known "small steps at big ND turns" item.
+
+
+---
+
+## Addendum 9 — 20 Oct 2026: Phase 1 passed, Phase 2 step 1
+
+Phase 1 results on James's PC are recorded in GUI_PLAN.md (Flet accepted; ADR-006: app-drawn timeline via RawImage). The smoother (`deflicker._local_lines`) now runs all frames at once in numpy blocks: identical to the frame-by-frame original (kept as `_local_lines_one_at_a_time` and tested against), about 100x faster; the test suite went from ~2 min to ~45 s.
+
+Phase 2 step 1, app services (`harbium_timelapse.app`): `config` (preferences, recent projects, per-user config dir, `HARBIUM_CONFIG`), `project` (stage/settings/dismissed flags in `.timelapse-core/project.json`, versioned), `jobs` (thread runner, progress thinned to ~10/s, cancel via the token, plain-English failures), `session` (open_folder, measure once, preview/apply/undo with `raw_brightness`, export_status for noticing the export, plan_export/write_export shared with the CLI). Editors' `prepare` accepts `raw_brightness` (RapidRAW now too).
+
+Two bugs found and fixed: video-only `finish` runs never saved their report (`report.write` now accepts a .json path; regression test); the moving-camera check raised false alarms on featureless frames (plain sky, fog): `review.shift` now returns a confidence, only matches ≥ 0.1 count (real matches 0.4–1, featureless 0.04), and with too few confident pairs the answer is "can't tell" (regression test).

@@ -12,7 +12,6 @@ import json
 import sys
 from pathlib import Path
 
-from . import report
 from .deflicker import DEFAULT_WINDOW, check_window, smooth_flicker
 from .review import EDGE, moving_camera_note
 from .review import review as review_frames
@@ -195,14 +194,7 @@ def _render(args) -> int:
 
 
 def _finish(args) -> int:
-    from .finish import Meter, apply_finish, check_video_target, finished_frames, measure_channels, plan_finish
-
-    def bar(word):
-        def progress(i: int, n: int) -> None:
-            print(f"\r  {word} {i}/{n}", end="", file=sys.stderr, flush=True)
-            if i == n:
-                print(file=sys.stderr)
-        return progress
+    from .finish import check_video_target, finished_frames
 
     if args.fps <= 0 or (args.width is not None and args.width < 16) or args.window < 3:
         print("Check the numbers: --fps above 0, --width at least 16, --window at least 3.", file=sys.stderr)
@@ -217,20 +209,22 @@ def _finish(args) -> int:
         print("Say where to put the result: --out FOLDER for frames, --video FILE.mp4, or both "
               "(or --dry-run to just measure).", file=sys.stderr)
         return 1
+    from .app import session
+    from .progress import Tracker
+    tracker = Tracker(_show_progress)
     try:
         frames = finished_frames(args.folder.expanduser())
         print(f"{len(frames)} finished frames in {frames[0].parent}")
-        before = Meter(motion=True)
-        measured = measure_channels(frames, bar("Measuring"), meter=before)
-        p = plan_finish(frames, window=args.window, colour=not args.brightness_only, measured=measured)
+        planned = session.plan_export(args.folder, window=args.window, colour=not args.brightness_only,
+                                      tracker=tracker)
     except (ValueError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
+    p = planned.plan
     if p.unmeasured:
         print("  " + describe_unmeasured([p.frames[i].name for i in p.unmeasured]))
-    moving = moving_camera_note(before.motion())
-    if moving:
-        print(f"  Warning: {moving}")
+    if planned.moving_camera:
+        print(f"  Warning: {planned.moving_camera}")
     print(f"  Brightness wobble: {p.brightness_before:.3f} stops now, {p.brightness_after:.3f} after")
     if not args.brightness_only:
         print(f"  Colour wobble:     {p.colour_before:.3f} now, {p.colour_after:.3f} after")
@@ -247,35 +241,28 @@ def _finish(args) -> int:
         print("  Dry run: nothing written.")
         return 0
     try:
-        after = Meter()
-        written = apply_finish(p, out=args.out, video=args.video, fps=args.fps, width=args.width,
-                               progress=bar("Writing"), fmt=args.format, codec=args.codec,
-                               dither=not args.no_dither, meter=after)
+        done = session.write_export(planned, out=args.out, video=args.video, fps=args.fps, width=args.width,
+                                    codec=args.codec, dither=not args.no_dither, fmt=args.format,
+                                    settings={"window": args.window, "colour": not args.brightness_only},
+                                    tracker=tracker)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
-    from .finish import LUMA, _wobble
-    check = after.series()
-    print(f"  Measured on the corrected frames: brightness {_wobble(check @ LUMA):.3f} stops, "
-          f"colour {_wobble(check[:, 0] - check[:, 2]):.3f}")
-    findings = review_frames(check, [f.name for f in frames])
-    _print_findings(findings, len(frames))
+    print(f"  Measured on the corrected frames: brightness {done.brightness_after:.3f} stops, "
+          f"colour {done.colour_after:.3f}")
+    _print_findings(done.findings, len(frames))
     if args.out:
         print(f"  Corrected frames: {args.out}")
     if args.video:
         print(f"  Video: {args.video} ({args.video.stat().st_size / 1e6:.1f} MB)")
-    settings = {"window": args.window, "colour": not args.brightness_only, "measure": "regional-vote-1",
-                "codec": args.codec if args.video else None, "dither": not args.no_dither,
-                "fps": args.fps, "width": args.width}
-    folder = args.out if args.out else args.video.parent
-    try:
-        saved = report.write(report.finish_report(p, written if args.out else None, settings, check, findings,
-                                                  before.motion(), where=folder),
-                             folder if args.out else args.video.with_name(args.video.stem + ".timelapse-report.json"))
-        print(f"  Report: {saved}")
-    except OSError as e:
-        print(f"  (Couldn't save the run report: {e})")
+    print(f"  Report: {done.report}" if done.report else "  (Couldn't save the run report.)")
     return 0
+
+
+def _show_progress(p) -> None:
+    print(f"\r  {p.stage} {p.done}/{p.total}", end="", file=sys.stderr, flush=True)
+    if p.done >= p.total:
+        print(file=sys.stderr)
 
 
 def _print_findings(findings, n: int) -> None:

@@ -77,8 +77,13 @@ def edges(n: int) -> list[int]:
     return sorted(set(range(min(EDGE, n))) | set(range(max(0, n - EDGE), n)))
 
 
-def shift(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
-    """How far ``b`` is shifted from ``a``, in pixels (phase correlation)."""
+CONFIDENT = 0.1      # alignment match strength: real matches score 0.4 to 1, featureless noise under 0.05
+
+
+def shift(a: np.ndarray, b: np.ndarray) -> tuple[float, float, float]:
+    """How far ``b`` is shifted from ``a`` in pixels, and how confident the match
+    is (phase correlation peak: about 0.4 to 1 for a real match; under 0.05
+    when there's nothing to line up, such as a plain sky with fresh noise)."""
     a = a - a.mean()
     b = b - b.mean()
     window = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1]))
@@ -86,14 +91,19 @@ def shift(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
     r = np.fft.ifft2(f / (np.abs(f) + 1e-12)).real
     y, x = np.unravel_index(int(r.argmax()), r.shape)
     h, w = r.shape
-    return float(y if y < h / 2 else y - h), float(x if x < w / 2 else x - w)
+    return float(y if y < h / 2 else y - h), float(x if x < w / 2 else x - w), float(r.max())
 
 
-def camera_motion(shifts: list[tuple[float, float]], width: int) -> float:
-    """Typical movement between frames as a share of the picture width."""
+def camera_motion(shifts: list[tuple[float, float, float]], width: int) -> float:
+    """Typical movement between frames as a share of the picture width, from
+    confident matches only. If most frames have nothing to line up (fog, a
+    plain sky), there's no telling, and the answer is 0 rather than a guess."""
     if not shifts or width <= 0:
         return 0.0
-    return float(np.median([np.hypot(*s) for s in shifts]) / width)
+    confident = [(dy, dx) for dy, dx, strength in shifts if strength >= CONFIDENT]
+    if len(confident) < len(shifts) / 3:
+        return 0.0
+    return float(np.median([np.hypot(dy, dx) for dy, dx in confident]) / width)
 
 
 def moving_camera_note(motion: float) -> str | None:

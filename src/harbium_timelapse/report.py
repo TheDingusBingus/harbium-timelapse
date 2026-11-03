@@ -72,9 +72,10 @@ def finish_report(plan, written: list[Path] | None, settings: dict, check=None, 
     }
 
 
-def write(report: dict, folder: Path) -> Path:
-    """Save atomically as ``timelapse-report.json`` in ``folder``."""
-    target = Path(folder) / NAME
+def write(report: dict, where: Path) -> Path:
+    """Save atomically: as ``timelapse-report.json`` in a folder, or to a ``.json`` file path."""
+    where = Path(where)
+    target = where if where.suffix.lower() == ".json" else where / NAME
     temp = target.with_name(target.name + ".tmp")
     temp.write_text(json.dumps(report, indent=1), encoding="utf-8")
     os.replace(temp, target)

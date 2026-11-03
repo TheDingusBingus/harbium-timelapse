@@ -10,3 +10,9 @@ import pytest  # noqa: E402
 def _private_cache(tmp_path_factory, monkeypatch):
     """Tests never touch the real settings cache in your home folder."""
     monkeypatch.setenv("HARBIUM_CACHE", str(tmp_path_factory.mktemp("cache")))
+
+
+@pytest.fixture(autouse=True)
+def _private_config(tmp_path_factory, monkeypatch):
+    """Tests never touch the real app preferences or recent-projects list."""
+    monkeypatch.setenv("HARBIUM_CONFIG", str(tmp_path_factory.mktemp("config")))
