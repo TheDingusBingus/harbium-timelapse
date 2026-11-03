@@ -83,19 +83,40 @@ class ExportSettings:
 
 BUILT_IN = {
     "share": {"label": "Share", "detail": "H.264, up to 4K: plays on anything",
-              "settings": {"output": "video", "codec": "h264", "resolution": "4K", "quality": None, "chroma": None,
-                           "bit_depth": None}},
+              "settings": {"codec": "h264", "resolution": "4K", "quality": None, "chroma": None, "bit_depth": None}},
     "master": {"label": "Master", "detail": "H.265 10-bit, up to 4K: smoother skies, smaller files",
-               "settings": {"output": "video", "codec": "h265", "resolution": "4K", "quality": None, "chroma": None,
-                            "bit_depth": 10}},
+               "settings": {"codec": "h265", "resolution": "4K", "quality": None, "chroma": None, "bit_depth": None}},
     "edit": {"label": "Edit", "detail": "ProRes 422 HQ at full size: near-lossless, for a video editor",
-             "settings": {"output": "video", "codec": "prores", "prores_profile": "hq", "resolution": "native"}},
-    "frames": {"label": "Frames", "detail": "Corrected frames as high-quality JPEGs, for stills or a photo series",
-               "settings": {"output": "frames", "frames_format": "jpg", "jpeg_quality": 98}},
+             "settings": {"codec": "prores", "prores_profile": "hq", "resolution": "native", "quality": None,
+                          "chroma": None, "bit_depth": None}},
 }
 
-SETTING_KEYS = ("output", "codec", "quality", "bit_depth", "chroma", "prores_profile", "resolution", "custom_width",
-                "fps", "dither", "frames_format", "jpeg_quality")
+# A preset describes how the video is encoded. Output (video, frames or both), frame rate, trimming, frame
+# format and where things are saved belong to this export, not to a preset, so changing them never changes it.
+SETTING_KEYS = ("codec", "quality", "bit_depth", "chroma", "prores_profile", "resolution", "custom_width", "dither")
+
+
+def _normal(values: dict) -> dict:
+    """A preset's encoding settings with defaults filled in, so equal choices compare equal."""
+    base = ExportSettings()
+    full = {k: values.get(k, getattr(base, k)) for k in SETTING_KEYS}
+    opts = VideoOptions(full["codec"], full["quality"], full["bit_depth"], full["chroma"], full["prores_profile"])
+    full["quality"] = None if full["codec"] == "prores" else (full["quality"] if full["quality"] is not None
+                                                             else DEFAULT_CRF[full["codec"]])
+    full["bit_depth"], full["chroma"] = opts.depth, opts.subsampling
+    full["prores_profile"] = full["prores_profile"] if full["codec"] == "prores" else None
+    full["custom_width"] = full["custom_width"] if full["resolution"] == "custom" else None
+    return full
+
+
+def matching_preset(settings: "ExportSettings") -> str:
+    """The preset these settings are, or "custom". Change something and change it back: the preset comes back."""
+    mine = _normal({k: getattr(settings, k) for k in SETTING_KEYS})
+    for name, preset in list(BUILT_IN.items()) + list(user_presets().items()):
+        values = preset["settings"] if name in BUILT_IN else preset
+        if _normal(values) == mine:
+            return name
+    return "custom"
 
 
 def user_presets() -> dict[str, dict]:
@@ -128,10 +149,40 @@ def apply_preset(settings: ExportSettings, name: str) -> ExportSettings:
     values = BUILT_IN[name]["settings"] if name in BUILT_IN else user_presets().get(name)
     if values is None:
         raise ValueError(f"There's no preset called {name}.")
-    out = replace(settings, preset=name, **{k: v for k, v in values.items() if k in SETTING_KEYS})
+    defaults = ExportSettings()
+    out = replace(settings, preset=name, **{k: values.get(k, getattr(defaults, k)) for k in SETTING_KEYS})
     if out.video_path:
         out.video_path = str(Path(out.video_path).with_suffix(out.suffix))
     return out
+
+
+# --- words for people who don't know the jargon ----------------------------------------------------
+
+CODEC_CHOICES = [("h264", "H.264 (plays anywhere)"), ("h265", "H.265 (smaller files, smoother skies)"),
+                 ("prores", "ProRes (for video editors)")]
+DEPTH_CHOICES = [(10, "10-bit (smoother gradients)"), (8, "8-bit (plays on older devices)")]
+CHROMA_CHOICES = [("420", "Standard 4:2:0 (for watching)"), ("422", "More colour 4:2:2 (editing)"),
+                  ("444", "Full colour 4:4:4 (editing)")]
+PRORES_CHOICES = [("proxy", "Proxy (smallest, for rough cuts)"), ("lt", "LT (light)"), ("standard", "422 (standard)"),
+                  ("hq", "422 HQ (recommended)"), ("4444", "4444 (full colour)")]
+
+
+def explain(s: ExportSettings) -> str:
+    """One or two plain sentences on what the current video choice means."""
+    o = s.options()
+    if o.codec == "prores":
+        return ("ProRes keeps nearly all the quality, for cutting in a video editor such as Premiere, Resolve or "
+                "Final Cut. Files are large. " + ("4444 keeps full colour detail." if o.subsampling == "444" else
+                "Colour is kept at 4:2:2, plenty for grading."))
+    words = ["H.264 plays on practically anything." if o.codec == "h264" else
+             "H.265 gives smaller files than H.264 at the same quality, and smoother skies."]
+    if o.codec == "h265":
+        words.append("10-bit keeps gradients smooth at about the same file size; 8-bit plays on older devices."
+                     if o.depth == 10 else "8-bit plays on older devices; 10-bit would keep gradients smoother "
+                     "at about the same file size.")
+    words.append("Standard colour (4:2:0) is what every player and website uses." if o.subsampling == "420" else
+                 "More colour detail (4:2:2 or 4:4:4) is for editing; many players and websites can't play it.")
+    return " ".join(words)
 
 
 # --- checks ----------------------------------------------------------------------------------------

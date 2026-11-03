@@ -25,15 +25,21 @@ def opened_export(tmp_path, n=12):
     return m
 
 
-def test_presets_and_custom(tmp_path):
+def test_presets_are_matched_not_flagged(tmp_path):
     m = opened_export(tmp_path)
-    assert m.out.preset == "share" and m.out.codec == "h264"
+    assert m.preset == "share" and m.out.codec == "h264"
     m.choose_preset("edit")
     assert m.out.codec == "prores" and m.video_path.suffix == ".mov"      # the file follows the format
+    for change in ({"output": "both"}, {"fps": 25.0}, {"first": 2, "last": 9}):
+        m.set_export(**change)
+        assert m.preset == "edit"                                          # not part of any preset
     m.set_export(prores_profile="4444")
-    assert m.out.preset == "custom"
-    m.choose_preset("frames")
-    assert m.out.output == "frames" and m.out.jpeg_quality == 98
+    assert m.preset == "custom"
+    m.set_export(prores_profile="hq")
+    assert m.preset == "edit"                                              # changed back: the preset is back
+    m.choose_preset("master")
+    m.set_export(bit_depth=10)                                             # Master's own default, said explicitly
+    assert m.preset == "master"
 
 
 def test_your_own_presets_are_saved_and_can_be_deleted(tmp_path):
@@ -70,7 +76,7 @@ def test_problems_block_the_export_and_say_why(tmp_path):
 
 def test_a_frames_only_export_and_the_time_estimate_afterwards(tmp_path):
     m = opened_export(tmp_path)
-    m.choose_preset("frames")
+    m.set_export(output="frames", jpeg_quality=98)
     m.set_frames_folder(tmp_path / "series")
     assert "first export of this kind" in m.export_check["estimate"]
     m.start_finish()
@@ -90,3 +96,29 @@ def test_trimmed_video_with_advanced_options(tmp_path):
     m.wait()
     assert m.screen == "done" and (tmp_path / "film.mp4").exists(), m.message
     assert len(m.finished.check) == 8
+
+
+def test_choices_are_explained_in_plain_words(tmp_path):
+    from harbium_timelapse.gui.models.export import ExportSettings, explain
+    assert "plays on practically anything" in explain(ExportSettings(codec="h264"))
+    text = explain(ExportSettings(codec="h265"))
+    assert "smaller files" in text and "about the same file size" in text and "every player" in text
+    assert "for editing" in explain(ExportSettings(codec="h264", chroma="444"))
+    assert "video editor" in explain(ExportSettings(codec="prores"))
+
+
+def test_the_visual_trim_uses_cached_thumbnails(tmp_path):
+    from harbium_timelapse.app.thumbs import thumbnail
+    m = opened_export(tmp_path, n=30)
+    import time
+    end = time.time() + 20
+    while not m.trim_strip and time.time() < end:
+        time.sleep(0.05)
+    assert m.trim_frames == 30 and len(m.trim_strip) == 12 and all(p.exists() for _, p in m.trim_strip)
+    first = sorted((tmp_path / "final-export").iterdir())[0]
+    assert thumbnail(first) == thumbnail(first)                            # made once, then reused
+    m.set_trim(5, 20)
+    assert (m.out.first, m.out.last, m.preset) == (5, 20, "share")
+    m.set_trim(1, 30)
+    assert (m.out.first, m.out.last) == (None, None)                       # the whole sequence again
+    assert m.frame_time(25) == "0:01.0"

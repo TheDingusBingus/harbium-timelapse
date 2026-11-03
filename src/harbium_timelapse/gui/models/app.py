@@ -25,6 +25,7 @@ from ...app.jobs import Done, Failed, JobRunner, Stopped
 from ...app.project import STAGES, load_project
 from ...progress import Progress
 from .export import (BUILT_IN, RESOLUTIONS, ExportSettings, apply_preset, delete_user_preset, describe,
+                     matching_preset,
                      estimate_bytes, estimate_seconds, free_bytes, notes, output_size, problems, remember_speed,
                      save_user_preset, user_presets)
 
@@ -36,6 +37,7 @@ PRESETS = {k: {"label": v["label"], "detail": v["detail"], "codec": v["settings"
                "suffix": ".mov" if v["settings"].get("codec") == "prores" else ".mp4"}
            for k, v in BUILT_IN.items()}
 
+STRIP = 12                      # thumbnails across the sequence in the visual trim
 STOPPED = "Stopped. Everything written so far is consistent: run it again to carry on, or undo."
 
 
@@ -92,6 +94,7 @@ class AppModel:
         self.export_since = None
         self.export = None
         self.out = ExportSettings()
+        self.trim_frames, self.trim_strip, self.trim_ends, self.trim_version = 0, [], (), 0
         self.out_version = 0            # goes up whenever an export setting changes (screens rebuild on it)
         self._check_cache = None
         self.planned = None
@@ -206,6 +209,7 @@ class AppModel:
             self.export_since = self.clock()
         elif screen == "finish":
             self._check_cache = None                    # free space and remembered speeds may have changed
+            self.request_trim_thumbs()
             if self.video_path is None:
                 self._default_video_path()
         self.changed()
@@ -451,8 +455,7 @@ class AppModel:
     def _changed_export(self, custom: bool = True) -> None:
         self.out_version += 1
         self._check_cache = None
-        if custom:
-            self.out.preset = "custom"
+        self.out.preset = matching_preset(self.out)          # worked out, never just flagged
         if self.out.video_path:
             self.out.video_path = str(Path(self.out.video_path).with_suffix(self.out.suffix))
         if self.project is not None:
@@ -460,7 +463,8 @@ class AppModel:
         self.changed()
 
     def set_export(self, **values) -> None:
-        """Change advanced options (codec, quality, resolution, fps, output, trim, ...); the preset becomes Custom."""
+        """Change options (codec, quality, resolution, fps, output, trim, ...). The preset shown is whichever one
+        the encoding settings match; output, frame rate, trim and locations never change it."""
         for k, v in values.items():
             if not hasattr(self.out, k):
                 raise AttributeError(k)
@@ -477,7 +481,6 @@ class AppModel:
     def save_preset(self, name: str) -> None:
         try:
             save_user_preset(name, self.out)
-            self.out.preset = name.strip()
             self._notice(f"Saved the preset {name.strip()}.")
         except ValueError as e:
             self._notice(str(e), "error")
@@ -485,8 +488,6 @@ class AppModel:
 
     def delete_preset(self, name: str) -> None:
         delete_user_preset(name)
-        if self.out.preset == name:
-            self.out.preset = "custom"
         self._changed_export(custom=False)
 
     @property
@@ -496,7 +497,45 @@ class AppModel:
 
     @property
     def preset(self) -> str:
-        return self.out.preset
+        return matching_preset(self.out)
+
+    # --- the visual trim: thumbnails made quietly in the background -------------------------------------
+
+    def request_trim_thumbs(self) -> None:
+        """A strip of thumbnails across the export, and the chosen first and last frames, made in the background."""
+        if self.project is None or not self.project.export or not Path(self.project.export).is_dir():
+            return
+        from ...app.thumbs import thumbnail
+        from ...finish import finished_frames
+        export = Path(self.project.export)
+        first, last = self.out.first, self.out.last
+
+        def work(t):
+            frames = finished_frames(export)
+            n = len(frames)
+            picks = sorted({round(i * (n - 1) / (STRIP - 1)) for i in range(STRIP)})
+            strip = [(i, thumbnail(frames[i])) for i in picks]
+            a, b = (first or 1) - 1, (last or n) - 1
+            ends = (thumbnail(frames[min(max(a, 0), n - 1)]), thumbnail(frames[min(max(b, 0), n - 1)]))
+            return n, strip, ends
+
+        def done(event):
+            if isinstance(event, Done):
+                self.trim_frames, self.trim_strip, self.trim_ends = event.result
+                self.trim_version += 1
+                self.changed()
+        self.runner.start("Thumbnails", work, lambda e: None if isinstance(e, Progress) else self.post(lambda: done(e)))
+
+    def set_trim(self, first: int | None, last: int | None) -> None:
+        n = self.trim_frames
+        self.set_export(first=None if not first or first <= 1 else int(first),
+                        last=None if not last or (n and last >= n) else int(last))
+        self.request_trim_thumbs()
+
+    def frame_time(self, frame: int) -> str:
+        """Where a frame lands in the video, as minutes:seconds."""
+        seconds = (frame - 1) / max(self.out.fps, 1)
+        return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
 
     @property
     def video_path(self) -> Path | None:

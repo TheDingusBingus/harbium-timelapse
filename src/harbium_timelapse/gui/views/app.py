@@ -17,7 +17,8 @@ import flet as ft
 
 from ...app.session import ExportStatus
 from ..models import AppModel, Series, render_timeline
-from ..models.export import BUILT_IN, FRAME_RATES, RESOLUTIONS
+from ..models.export import (BUILT_IN, CHROMA_CHOICES, CODEC_CHOICES, DEPTH_CHOICES, FRAME_RATES, PRORES_CHOICES,
+                             RESOLUTIONS, explain)
 from ..models.timeline import Theme
 from ..theme import BODY, DARK, DISPLAY, FONTS, LIGHT, MONO
 
@@ -36,6 +37,14 @@ def open_path(path: Path, select: bool = False) -> None:
         subprocess.Popen(["open", "-R" if select else "", str(path)] if select else ["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path.parent if select else path)])
+
+
+def _image_bytes(path) -> bytes:
+    """A small image's data, so it shows the same in the desktop app and in a browser (which can't read local paths)."""
+    try:
+        return Path(path).read_bytes()
+    except OSError:
+        return b""
 
 
 class UI:
@@ -273,8 +282,9 @@ class FinishScreen(Screen):
 
     def refresh(self):
         m = self.m
-        if self._version != m.out_version:                   # settings changed: lay the window out again
-            self._version = m.out_version
+        version = (m.out_version, m.trim_version)
+        if self._version != version:                         # settings or thumbnails changed: lay out again
+            self._version = version
             self.box.controls = self._controls()
         if self.go_btn is not None:
             self.go_btn.disabled = not m.can_finish
@@ -297,26 +307,28 @@ class FinishScreen(Screen):
                                 dense=True, width=width, border_color=ui.t["line"],
                                 on_blur=lambda e: on_done(e.control.value), on_submit=lambda e: on_done(e.control.value))
 
+        current = m.preset
         presets = []
         for key, label in m.presets:
-            chosen = key == s.preset
-            presets.append((ui.primary if chosen else ui.secondary)(label, lambda e, k=key: m.choose_preset(k)))
-        if s.preset == "custom":
-            presets.append(ui.primary("Custom", None))
-        detail = BUILT_IN[s.preset]["detail"] if s.preset in BUILT_IN else (
-            "Your own preset." if s.preset != "custom" else "Your own settings; save them as a preset below.")
+            presets.append((ui.primary if key == current else ui.secondary)(label, lambda e, k=key: m.choose_preset(k)))
+        presets.append(ui.primary("Custom", None) if current == "custom" else
+                       ui.secondary("Custom", None, disabled=True))        # always there, so nothing jumps
+        detail = BUILT_IN[current]["detail"] if current in BUILT_IN else (
+            "Your own preset." if current != "custom" else "Your own settings: save them as a preset below.")
 
         out = [ui.title("Export"),
                ui.text("Smooths whatever flicker is left in your export, then writes the video, the frames, or both.",
                        dim=True, size=14),
                row("Exported frames", ui.text(m.project.export or "Not chosen yet", mono=True, size=14),
                    ui.secondary("Change", self.choose_export)),
-               row("Preset", ft.Row(presets, spacing=8, wrap=True)), row("", ui.text(detail, dim=True, size=14)),
                row("Output", ft.SegmentedButton(
                    segments=[ft.Segment(value=v, label=ft.Text(t)) for v, t in
                              (("video", "Video"), ("frames", "Frames"), ("both", "Both"))],
                    selected=[s.output], allow_multiple_selection=False,
                    on_change=lambda e: m.set_export(output=list(e.control.selected)[0])))]
+        if s.video:
+            out += [row("Video preset", ft.Row(presets, spacing=8, wrap=True)),
+                    row("", ui.text(detail, dim=True, size=14))]
         if s.video:
             out.append(row("Video", path_field(s.video_path, self.typed_video), ui.secondary("Change", self.choose_video)))
         if s.frames:
@@ -370,36 +382,55 @@ class FinishScreen(Screen):
             rows.append(row("Resolution", *res))
             rows.append(row("Frame rate", dropdown(s.fps, [(f, f"{f:g}") for f in FRAME_RATES],
                                                    lambda v: m.set_export(fps=float(v)), 140)))
-            fmt = [dropdown(s.codec, [("h264", "H.264"), ("h265", "H.265"), ("prores", "ProRes")],
-                            lambda v: m.set_export(codec=v, chroma=None, bit_depth=None), 160)]
+            fmt = [dropdown(s.codec, CODEC_CHOICES, lambda v: m.set_export(codec=v, chroma=None, bit_depth=None), 300)]
             if s.codec == "h265":
-                fmt.append(dropdown(s.bit_depth or 10, [(10, "10-bit"), (8, "8-bit")],
-                                    lambda v: m.set_export(bit_depth=int(v)), 120))
+                fmt.append(dropdown(s.bit_depth or 10, DEPTH_CHOICES, lambda v: m.set_export(bit_depth=int(v)), 270))
             if s.codec == "prores":
-                fmt.append(dropdown(s.prores_profile, [("proxy", "Proxy"), ("lt", "LT"), ("standard", "422"),
-                                                       ("hq", "422 HQ"), ("4444", "4444")],
-                                    lambda v: m.set_export(prores_profile=v), 140))
+                fmt.append(dropdown(s.prores_profile, PRORES_CHOICES, lambda v: m.set_export(prores_profile=v), 280))
             else:
-                fmt.append(dropdown(s.chroma or "420", [("420", "4:2:0"), ("422", "4:2:2"), ("444", "4:4:4")],
-                                    lambda v: m.set_export(chroma=v), 120))
+                fmt.append(dropdown(s.chroma or "420", CHROMA_CHOICES, lambda v: m.set_export(chroma=v), 360))
             rows.append(row("Format", *fmt))
+            rows.append(row("", ft.Container(ui.text(explain(s), dim=True, size=13), width=720)))
             if s.codec != "prores":
                 crf = s.quality if s.quality is not None else (16 if s.codec == "h264" else 18)
-                rows.append(row("Quality", ui.text("Better", dim=True, size=13),
-                                ft.Slider(min=8, max=32, divisions=24, value=crf, label="CRF {value}", width=260,
+                rows.append(row("Quality", ui.text("Higher", dim=True, size=13),
+                                ft.Slider(min=8, max=32, divisions=24, value=crf, width=260,
+                                          label="{value}" + (" (the default)" if s.quality is None else ""),
                                           on_change_end=lambda e: m.set_export(quality=int(e.control.value))),
-                                ui.text("Smaller", dim=True, size=13)))
+                                ui.text("Lower", dim=True, size=13),
+                                ui.text("Higher quality means bigger files.", dim=True, size=13)))
             rows.append(row("Dither", ft.Switch(value=s.dither, on_change=lambda e: m.set_export(dither=e.control.value)),
                             ui.text("hides banding in smooth skies (costs a little file size)", dim=True, size=13)))
-        trim = []
-        for label, attr in (("First frame", "first"), ("Last frame", "last")):
-            trim += [ui.text(label, dim=True, size=13),
-                     ft.TextField(value=str(getattr(s, attr) or ""), hint_text="all", width=90, dense=True, text_size=13,
-                                  border_color=ui.t["line"],
-                                  on_blur=lambda e, a=attr: m.set_export(**{a: int(e.control.value)
-                                                                             if e.control.value.strip().isdigit() else None}))]
-        rows.append(row("Trim", *trim))
+        rows += self._trim()
         return rows
+
+    def _trim(self) -> list:
+        """Trim by eye: thumbnails across the sequence, a two-handled slider, and the chosen first and last frames."""
+        ui, m, s = self.ui, self.m, self.m.out
+        n = m.trim_frames
+        if n < 2:
+            return [ft.Row([ft.Container(ui.text("Trim", dim=True, size=14), width=150),
+                            ui.text("Making thumbnails...", dim=True, size=13)])]
+        first, last = s.first or 1, s.last or n
+        strip = ft.Row([ft.Image(src=_image_bytes(path), width=62, height=42, fit=ft.BoxFit.COVER, border_radius=2,
+                                 opacity=1.0 if first - 1 <= i <= last - 1 else 0.3) for i, path in m.trim_strip],
+                       spacing=2)
+        slider = ft.RangeSlider(min=1, max=n, start_value=first, end_value=last, divisions=n - 1, label="{value}",
+                                width=62 * len(m.trim_strip) + 2 * (len(m.trim_strip) - 1),
+                                on_change_end=lambda e: m.set_trim(int(e.control.start_value), int(e.control.end_value)))
+        ends = []
+        for label, frame, path in (("First", first, m.trim_ends[0] if m.trim_ends else None),
+                                   ("Last", last, m.trim_ends[1] if m.trim_ends else None)):
+            ends.append(ft.Column([ft.Image(src=_image_bytes(path), width=180, height=120, fit=ft.BoxFit.COVER, border_radius=2)
+                                   if path else ft.Container(width=180, height=120),
+                                   ui.text(f"{label}: frame {frame} ({m.frame_time(frame)})", dim=True, size=13)],
+                                  spacing=4))
+        summary = (f"All {n} frames" if (first, last) == (1, n) else
+                   f"Frames {first} to {last}: {last - first + 1} of {n}, "
+                   f"{(last - first + 1) / max(s.fps, 1):.1f} s of video")
+        return [ft.Row([ft.Container(ui.text("Trim", dim=True, size=14), width=150),
+                        ft.Column([strip, slider, ui.text(summary, dim=True, size=13), ft.Row(ends, spacing=16)],
+                                  spacing=6)], vertical_alignment=ft.CrossAxisAlignment.START)]
 
     # -- actions ----------------------------------------------------------------------------------
     def toggle_advanced(self, e):
