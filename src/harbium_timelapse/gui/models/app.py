@@ -86,6 +86,9 @@ class AppModel:
         self._reset_project_state()
 
     def _reset_project_state(self) -> None:
+        self.preview_images = None            # small linear previews of the RAW frames, for time slices
+        self.preview_status = ""
+        self._slice = None
         self.measured = None
         self.preview = None
         self.previewing = False
@@ -205,8 +208,13 @@ class AppModel:
         self.screen = screen
         if screen == "prepare":
             self._ensure_measured()
-        elif screen == "grade" and self.export_since is None:
-            self.export_since = self.clock()
+        elif screen == "grade":
+            if self.export_since is None:
+                self.export_since = self.clock()
+            self._ensure_measured()                    # instant from the cache: brings back the time slice
+            if self.measured is not None:
+                self.request_preview()
+                self.load_previews()
         elif screen == "finish":
             self._check_cache = None                    # free space and remembered speeds may have changed
             self.request_trim_thumbs()
@@ -306,6 +314,50 @@ class AppModel:
     def _measured(self, measured) -> None:
         self.measured = measured
         self.request_preview()
+        self.load_previews()
+
+    # --- time slices from the RAW previews (Prepare and Grade) ----------------------------------------
+
+    def load_previews(self) -> None:
+        """Load the frames' small previews in the background, first making any that are missing (folders
+        measured before previews existed: one more read of the RAW files, at measuring speed)."""
+        if self.opened is None or self.opened.editor is None or self.preview_images is not None:
+            return
+        seq = self.opened.seq
+        from ...app import previews
+
+        def work(t):
+            self.s.ensure_previews(seq, t)
+            images = [previews.load(f.path) for f in seq]
+            return None if any(i is None for i in images) else images
+
+        def event(e):
+            if isinstance(e, Progress):
+                self.preview_status = f"Making previews {e.done} of {e.total} (once for this folder)"
+            elif isinstance(e, Done):
+                self.preview_images = e.result
+                self.preview_status = "" if e.result is not None else "Previews couldn't be made for every frame."
+            elif isinstance(e, Failed):
+                self.preview_status = f"Previews couldn't be made: {e.message}"
+            self.changed()
+        self.preview_status = "Loading previews..."
+        self.runner.start("Previews", work, lambda e: self.post(lambda: event(e)))
+
+    def time_slice(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """Before and after the prepared corrections, as 8-bit pictures, from the RAW previews. Instant: only
+        one band per frame is recomposed when the corrections change."""
+        if self.preview_images is None or self.preview is None or self.preview.deflicker is None:
+            return None
+        key = id(self.preview)
+        if self._slice is None or self._slice[0] != key:
+            from ...timeslice import compose, display_scale, to_display
+            images = self.preview_images
+            if not hasattr(self, "_slice_scale") or self._slice_scale[0] != id(images):
+                self._slice_scale = (id(images), display_scale(images))
+            scale = self._slice_scale[1]
+            stops = np.nan_to_num(np.asarray(self.preview.deflicker.exposure, dtype=np.float64))
+            self._slice = (key, to_display(compose(images), scale), to_display(compose(images, stops), scale))
+        return self._slice[1], self._slice[2]
 
     def set_window(self, window: int) -> None:
         self.project.settings["window"] = int(window)

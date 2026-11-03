@@ -14,10 +14,11 @@ from pathlib import Path
 import numpy as np
 
 from .. import measure_cache
+from . import previews
 from .. import report as run_report
 from ..editors import detect
 from ..editors.base import Editor, PrepareReport
-from ..finish import (JPEG_QUALITY, LUMA, FinishPlan, Meter, VideoOptions, _wobble, apply_finish, render_strip,
+from ..finish import (JPEG_QUALITY, LUMA, FinishPlan, Meter, VideoOptions, _wobble, apply_finish,
                       check_video_target, finished_frames, measure_channels, plan_finish)
 from ..measure import measure_brightness
 from ..progress import Tracker
@@ -73,7 +74,8 @@ def measure(seq: Sequence, tracker: Tracker | None = None) -> np.ndarray:
     cached = measure_cache.load(paths, "raw-brightness")
     if cached is not None:
         return cached["brightness"]
-    brightness = measure_brightness(seq, progress=tracker.stage("Measuring") if tracker else None)
+    brightness = measure_brightness(seq, progress=tracker.stage("Measuring") if tracker else None,
+                                    on_image=lambda i, img: previews.save(paths[i], img))
     measure_cache.save(paths, "raw-brightness", {"brightness": brightness})
     return brightness
 
@@ -99,6 +101,22 @@ def undo(editor: Editor, seq: Sequence) -> int:
     if editor.is_running():
         raise ValueError(f"{editor.label} is open. Close it, then try again.")
     return editor.undo(seq)
+
+
+def ensure_previews(seq: Sequence, tracker: Tracker | None = None) -> int:
+    """Make any previews that are missing (folders measured before previews existed). Decodes those RAW
+    files once, at measuring speed. Returns how many were made."""
+    from ..measure import _load_for_measuring
+    from ..parallel import ordered_map
+    paths = [f.path for f in seq]
+    todo = previews.missing(paths)
+    hook = tracker.stage("Making previews") if tracker else None
+    for done, (i, (image, _)) in enumerate(zip(todo, ordered_map(_load_for_measuring,
+                                                                  [(paths[i], "careful") for i in todo])), 1):
+        previews.save(paths[i], image)
+        if hook:
+            hook(done, len(todo))
+    return len(todo)
 
 
 # --- noticing the export ------------------------------------------------------------------
@@ -248,12 +266,15 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     check = after.series()
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")
-    # Beside the frames folder, never in it: image-sequence importers (and finish itself) would take it for a frame.
-    strip_path = (Path(out).parent / (Path(out).name + ".timelapse-strip.png") if out else
-                  Path(video).with_name(Path(video).stem + ".timelapse-strip.png"))
+    # The time slice, full size, beside the frames folder or the video: never inside a frames folder, where
+    # image-sequence importers (and finish itself) would take it for a frame.
+    strip_path = (Path(out).parent / (Path(out).name + ".timelapse-slice.jpg") if out else
+                  Path(video).with_name(Path(video).stem + ".timelapse-slice.jpg"))
     try:
         from PIL import Image
-        Image.fromarray(render_strip(columns["before"], columns["after"])).save(strip_path, optimize=False)
+        from ..timeslice import stack, to_8bit
+        picture = stack(to_8bit(columns["slice_before"]), to_8bit(columns["slice_after"]))
+        Image.fromarray(picture).save(strip_path, quality=93)
     except (OSError, KeyError, ValueError):
         strip_path = None
     settings = {"measure": "regional-vote-1", "codec": codec if video else None, "dither": dither,

@@ -100,6 +100,53 @@ class Screen:
         """Called when another screen takes over."""
 
 
+class SlicePanel:
+    """Before and after the prepared corrections, side by side, as time slices from the RAW previews."""
+    WIDTH = 784                     # the same width as the timeline panel, so the page never wraps
+    EACH = 372
+
+    def __init__(self, screen: Screen, words: str):
+        self.screen, self.m, self.ui = screen, screen.m, screen.ui
+        self.before = ft.Image(src=b"", width=self.EACH, fit=ft.BoxFit.CONTAIN, visible=False)
+        self.after = ft.Image(src=b"", width=self.EACH, fit=ft.BoxFit.CONTAIN, visible=False)
+        self.status = self.ui.text("", dim=True, size=13)
+        self.words = words
+        self._shown = None
+
+    def control(self) -> ft.Control:
+        ui = self.ui
+        side = lambda label, image: ft.Column([ui.text(label, size=13), image], spacing=4)   # noqa: E731
+        return ft.Container(ui.panel(ft.Column(
+            [ui.text("Time slice: the scene with time running left to right", dim=True, size=13),
+             ui.text(self.words, dim=True, size=12), self.status,
+             ft.Container(ft.Row([side("Before", self.before), side("After", self.after)], spacing=8),
+                          bgcolor=ui.t["surround"], padding=6, border_radius=2)], spacing=6), padding=12),
+            width=self.WIDTH)
+
+    def refresh(self) -> None:
+        self.status.value = self.m.preview_status
+        pictures = self.m.time_slice()
+        if pictures is not None and pictures[0] is not self._shown:
+            self._shown = pictures[0]
+            self.screen.view.page.run_task(self.draw, pictures)
+
+    async def draw(self, pictures):
+        import io
+        from PIL import Image
+
+        def make(picture) -> bytes:
+            img = Image.fromarray(picture)
+            scale = (self.EACH * 2) / img.width                       # twice the shown size: sharp on high-DPI screens
+            img = img.resize((self.EACH * 2, max(1, round(img.height * scale))), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=88)
+            return buf.getvalue()
+        self.before.src, self.after.src = await asyncio.gather(asyncio.to_thread(make, pictures[0]),
+                                                               asyncio.to_thread(make, pictures[1]))
+        self.before.visible = self.after.visible = True
+        self.screen.view.page.update()
+
+
 class StartScreen(Screen):
     def build(self):
         ui = self.ui
@@ -191,9 +238,14 @@ class PrepareScreen(Screen):
                  ft.Row([ui.secondary("Undo", lambda e: m.undo()), self.apply_btn], spacing=10)]
         self._drawn = None
         self.refresh()
+        self.slice = SlicePanel(self, "Each frame gives one band. A frame that jumps shows as a band lighter or "
+                                      "darker than its neighbours; after the corrections the bands should fade "
+                                      "smoothly. A rough guide from the RAW files, before your grade.")
+        self.slice.refresh()
         return ft.Row([ft.Column(side, spacing=12, width=380),
-                       ui.panel(ft.Column([ui.text("Brightness (stops): measured, and the smoothing curve",
-                                                   dim=True, size=13), self.timeline], spacing=8), padding=12)],
+                       ft.Column([ui.panel(ft.Column([ui.text("Brightness (stops): measured, and the smoothing curve",
+                                                              dim=True, size=13), self.timeline], spacing=8),
+                                           padding=12), self.slice.control()], spacing=16)],
                       spacing=28, vertical_alignment=ft.CrossAxisAlignment.START, wrap=True)
 
     def refresh(self):
@@ -206,6 +258,8 @@ class PrepareScreen(Screen):
         if m.preview is not None and m.preview is not self._drawn:
             self._drawn = m.preview
             self.view.page.run_task(self.draw)
+        if hasattr(self, "slice"):
+            self.slice.refresh()
 
     async def draw(self):
         series = self.m.prepare_series
@@ -229,15 +283,20 @@ class GradeScreen(Screen):
         self.refresh()
         steps = [ft.Container(ui.text(s, size=14), padding=ft.Padding(0, 10, 0, 10),
                               border=ft.Border(bottom=ft.BorderSide(1, ui.t["line"]))) for s in m.handoff_steps]
+        self.slice = SlicePanel(self, "What the applied corrections do to the light, from the RAW files (your "
+                                      "grade isn't in it). After should fade smoothly from band to band.")
+        self.slice.refresh()
         return ft.Row([ft.Column([ui.title(f"Over to {editor}."),
                                   ui.text("Grade the sequence however you like, then export every frame. "
                                           "This screen notices when the export lands.", dim=True, size=14),
                                   *steps], spacing=8, width=420),
-                       ft.Container(ui.panel(self.watch), width=440)],
+                       ft.Column([ft.Container(ui.panel(self.watch), width=440), self.slice.control()], spacing=16)],
                       spacing=32, vertical_alignment=ft.CrossAxisAlignment.START, wrap=True)
 
     def refresh(self):
         ui, m = self.ui, self.m
+        if hasattr(self, "slice"):
+            self.slice.refresh()
         s = m.export or ExportStatus("waiting")
         choose = ui.secondary("Choose folder instead", self.choose)
         if s.state == "waiting":
@@ -485,14 +544,14 @@ class DoneScreen(Screen):
         """The time strip: a quick-to-load view to zoom and pan, and the full-detail file a click away."""
         ui, m = self.ui, self.m
         path = m.finished.strip
-        if not path or not m.finished.strip_columns.get("before"):
+        if not path or "slice_before" not in m.finished.strip_columns:
             return []
         self.strip_view = ft.Image(src=b"", width=880, fit=ft.BoxFit.CONTAIN)
         self.view.page.run_task(self._load_strip)
-        return [ui.text("Time strip", size=14),
-                ui.text("Each thin stripe is one frame, left to right through the sequence. Flicker shows as "
-                        "vertical stripes in Before; After should run smoothly. Scroll to zoom, drag to look around.",
-                        dim=True, size=13),
+        return [ui.text("Time slice", size=14),
+                ui.text("Your scene with time running left to right: each frame gives one band of the picture. A frame "
+                        "that jumped shows as a band lighter or darker than its neighbours; After should fade smoothly. "
+                        "Scroll to zoom, drag to look around.", dim=True, size=13),
                 ft.Container(ft.InteractiveViewer(content=self.strip_view, min_scale=1, max_scale=12,
                                                   boundary_margin=ft.Margin.all(40)),
                              bgcolor=ui.t["surround"], padding=8, border_radius=2, width=896, height=420,
@@ -504,13 +563,14 @@ class DoneScreen(Screen):
     async def _load_strip(self):
         import io
         from PIL import Image
-        from ...finish import render_strip
         cols = self.m.finished.strip_columns
 
         def make() -> bytes:
-            img = render_strip(cols["before"], cols["after"], height=180)
+            from ...timeslice import stack, to_8bit
+            img = Image.fromarray(stack(to_8bit(cols["slice_before"]), to_8bit(cols["slice_after"])))
+            img.thumbnail((1760, 2400))
             buf = io.BytesIO()
-            Image.fromarray(img).save(buf, format="PNG")
+            img.save(buf, format="JPEG", quality=88)
             return buf.getvalue()
         self.strip_view.src = await asyncio.to_thread(make)
         self.view.page.update()

@@ -30,20 +30,21 @@ def flickering(folder, n=24):
         Image.fromarray((img ** (1 / 2.2) * 255).astype(np.uint8)).save(folder / f"f{i:02d}.png")
 
 
-def test_the_strip_is_saved_beside_the_frames_and_shows_the_flicker_going(tmp_path):
+def test_the_time_slice_is_saved_beside_the_frames_and_the_flicker_goes(tmp_path):
     flickering(tmp_path / "e")
     done = session.write_export(session.plan_export(tmp_path / "e"), out=tmp_path / "out")
-    assert done.strip == tmp_path / "out.timelapse-strip.png" and done.strip.exists()
+    assert done.strip == tmp_path / "out.timelapse-slice.jpg" and done.strip.exists()
     assert len(finished_frames(tmp_path / "out")) == 24                 # never taken for a frame
     before = np.array([c.mean() for c in done.strip_columns["before"]])
     after = np.array([c.mean() for c in done.strip_columns["after"]])
     jump = lambda v: np.abs(np.diff(np.log2(v))).mean()                  # noqa: E731
-    assert jump(after) < jump(before) / 4                                # the stripes are gone
+    assert jump(after) < jump(before) / 4                                # the diagnostic strip agrees
     img = Image.open(done.strip)
-    assert img.size[0] == 24 * 8 and img.size[1] == 2 * 80 + 56         # full detail: every row of every frame
+    assert img.size == (120, 2 * 80 + 2 * 28)                            # full size: the whole frame, twice
 
 
 def test_a_strip_sitting_in_a_frames_folder_is_ignored(tmp_path):
     flickering(tmp_path / "e", n=5)
     Image.new("RGB", (8, 8)).save(tmp_path / "e" / "old.timelapse-strip.png")
+    Image.new("RGB", (8, 8)).save(tmp_path / "e" / "old.timelapse-slice.png")
     assert len(finished_frames(tmp_path / "e")) == 5

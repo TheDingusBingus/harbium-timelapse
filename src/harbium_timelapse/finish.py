@@ -63,7 +63,7 @@ def finished_frames(folder: Path | str) -> list[Path]:
         raise ValueError(f"Can't find a folder at {folder}")
     frames = [p for p in folder.iterdir()
               if p.is_file() and p.suffix.lower() in RENDERABLE and not p.name.startswith(".")
-              and ".timelapse-strip" not in p.name]                  # a time strip is never a frame
+              and ".timelapse-strip" not in p.name and ".timelapse-slice" not in p.name]   # never a frame
     frames.sort(key=_natural_key)
     if len(frames) < 3:
         raise ValueError(f"Found {len(frames)} frames (JPEG, PNG or TIFF) in {folder}: need at least 3.")
@@ -498,10 +498,19 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 encoder.write(frame)
                 spent["correct"] += t1 - t0
                 spent["encode"] += clock() - t1
-            if strip is not None:                       # the time strip: a narrow slice of each frame, before and after
-                x = strip.get("x", 0.5)
+            if strip is not None:
+                corrected = fixed if fixed is not None else frame
+                x = strip.get("x", 0.5)                 # the diagnostic strip: one narrow slice of every frame
                 strip.setdefault("before", []).append(strip_column(img, x))
-                strip.setdefault("after", []).append(strip_column(fixed if fixed is not None else frame, x))
+                strip.setdefault("after", []).append(strip_column(corrected, x))
+                if "slice_before" not in strip:         # the time slice: this frame's own band of the picture
+                    from .timeslice import bands
+                    strip["slice_bands"] = bands(img.shape[1], len(plan.frames))
+                    strip["slice_before"] = np.empty(img.shape[:2] + (3,), img.dtype)
+                    strip["slice_after"] = np.empty(corrected.shape[:2] + (3,), corrected.dtype)
+                a, b = strip["slice_bands"][i]
+                strip["slice_before"][:, a:b] = img[:, a:b, :3]
+                strip["slice_after"][:, a:b] = corrected[:, a:b, :3]
             if checker is not None:
                 if checked is not None:
                     spent["check"] += checked.result()          # the previous frame's check, done meanwhile

@@ -47,6 +47,7 @@ def measure_brightness(
     frames: Sequence | Iterable[Path | str],
     speed: str = "careful",
     progress: Progress | None = None,
+    on_image=None,
 ) -> np.ndarray:
     """Brightness of every frame, in stops. Higher is brighter.
 
@@ -54,7 +55,7 @@ def measure_brightness(
     difference between frames: 0.1 apart means one frame is a tenth of a
     stop brighter than the other.
     """
-    return measure_light(frames, speed=speed, progress=progress)[0]
+    return measure_light(frames, speed=speed, progress=progress, on_image=on_image)[0]
 
 
 def measure_light(
@@ -62,6 +63,7 @@ def measure_light(
     speed: str = "careful",
     progress: Progress | None = None,
     steady: bool = True,
+    on_image=None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Brightness and warmth of every frame.
 
@@ -92,6 +94,8 @@ def measure_light(
     for i, (image, warmth[i]) in enumerate(loaded):
         profiles[i] = tone_profile(image)
         chain.add(steady_input(image))
+        if on_image is not None:
+            on_image(i, image)          # e.g. save a preview: the frame is decoded already, so it's nearly free
         if progress:
             progress(i + 1, len(paths))
     band = brightness_from_profiles(profiles)

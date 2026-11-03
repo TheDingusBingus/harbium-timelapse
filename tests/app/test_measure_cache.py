@@ -56,7 +56,7 @@ def test_raw_measurements_are_remembered_too(tmp_path, monkeypatch):
     paths = frames(tmp_path / "e", 6)
     seq = type("Seq", (), {"__iter__": lambda self: iter([type("F", (), {"path": p})() for p in paths])})()
     calls = {"n": 0}
-    def fake(seq, progress=None):
+    def fake(seq, progress=None, on_image=None):
         calls["n"] += 1
         return np.arange(6.0)
     monkeypatch.setattr(session, "measure_brightness", fake)
