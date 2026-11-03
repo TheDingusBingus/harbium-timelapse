@@ -31,8 +31,8 @@ STAGE_BAR = (("folder", "Folder"), ("prepare", "Prepare"), ("grade", "Grade"), (
 PRESETS = {
     "share": {"label": "Share", "detail": "H.264, up to 4K: plays on anything", "codec": "h264", "width": 3840,
               "suffix": ".mp4"},
-    "master": {"label": "Master", "detail": "H.265 10-bit at full size: smoother skies, similar file size. "
-               "Some PCs need Microsoft's HEVC extension to play it", "codec": "h265", "width": None,
+    "master": {"label": "Master", "detail": "H.265 10-bit, up to 4K: smoother skies, similar file size. "
+               "Some PCs need Microsoft's HEVC extension to play it", "codec": "h265", "width": 3840,
                "suffix": ".mp4"},
     "edit": {"label": "Edit", "detail": "ProRes 422 HQ at full size: near-lossless, for a video editor. "
              "Large files", "codec": "prores", "width": None, "suffix": ".mov"},

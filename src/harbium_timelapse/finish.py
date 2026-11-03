@@ -223,7 +223,8 @@ def _ffmpeg_encoders() -> set[str]:
 def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | str | None = None,
                  fps: float = 24, width: int | None = None, quality: int | None = None,
                  progress: Progress | None = None, fmt: str | None = None,
-                 codec: str = "h264", dither: bool = True, meter: "Meter | None" = None) -> list[Path]:
+                 codec: str = "h264", dither: bool = True, meter: "Meter | None" = None,
+                 finalising: Callable[[], None] | None = None) -> list[Path]:
     """Correct every frame. ``out``: a folder for corrected frames (same names;
     same format unless ``fmt`` is "jpg", "png" or "tif"). ``video``: an MP4
     encoded straight from the corrected frames, so nothing in between needs
@@ -291,6 +292,8 @@ def apply_finish(plan: FinishPlan, out: Path | str | None = None, video: Path | 
                 meter.add(_small_linear(fixed if fixed is not None else frame))
             if progress:
                 progress(i + 1, len(plan.frames))
+        if encoder is not None and finalising is not None:
+            finalising()              # every frame is in; the encoder can take a while to finish the file
         finished = True
     finally:
         if encoder is not None:
@@ -456,7 +459,7 @@ class _Encoder:
         crf = str(quality if quality is not None else CODECS[codec][4])
         video_args = {
             "h264": ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "slow", "-crf", crf],
-            "h265": ["-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "slow", "-crf", crf,
+            "h265": ["-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "medium", "-crf", crf,
                      "-x265-params", "log-level=error", "-tag:v", "hvc1"],
             "prores": ["-pix_fmt", "yuv422p10le", "-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0"],
         }[codec]

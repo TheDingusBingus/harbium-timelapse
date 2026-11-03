@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import measure_cache
 from .. import report as run_report
 from ..editors import detect
 from ..editors.base import Editor, PrepareReport
@@ -66,8 +67,15 @@ def open_folder(folder: Path, tracker: Tracker | None = None) -> Opened:
 # --- prepare: measure once, preview many times, apply ------------------------------------
 
 def measure(seq: Sequence, tracker: Tracker | None = None) -> np.ndarray:
-    """Brightness of every RAW frame. The slow part: done once, then previews are instant."""
-    return measure_brightness(seq, progress=tracker.stage("Measuring") if tracker else None)
+    """Brightness of every RAW frame. The slow part: done once per folder (and remembered between
+    runs while no file changes), then previews are instant."""
+    paths = [f.path for f in seq]
+    cached = measure_cache.load(paths, "raw-brightness")
+    if cached is not None:
+        return cached["brightness"]
+    brightness = measure_brightness(seq, progress=tracker.stage("Measuring") if tracker else None)
+    measure_cache.save(paths, "raw-brightness", {"brightness": brightness})
+    return brightness
 
 
 def preview(editor: Editor, seq: Sequence, measured: np.ndarray, window: int = 25, strength: float = 1.0,
@@ -168,9 +176,15 @@ class Finished:
 def plan_export(folder: Path, window: int = 25, colour: bool = True, tracker: Tracker | None = None) -> Planned:
     """Measure the exported frames and plan their corrections. Writes nothing."""
     frames = finished_frames(Path(folder).expanduser())
-    meter = Meter(motion=True)
-    measured = measure_channels(frames, tracker.stage("Measuring") if tracker else None, meter=meter)
-    return Planned(frames, plan_finish(frames, window=window, colour=colour, measured=measured), meter.motion())
+    cached = measure_cache.load(frames, "export-channels")
+    if cached is not None:
+        measured, motion = cached["measured"], float(cached["motion"][0])
+    else:
+        meter = Meter(motion=True)
+        measured = measure_channels(frames, tracker.stage("Measuring") if tracker else None, meter=meter)
+        motion = meter.motion()
+        measure_cache.save(frames, "export-channels", {"measured": measured, "motion": np.full(len(frames), motion)})
+    return Planned(frames, plan_finish(frames, window=window, colour=colour, measured=measured), motion)
 
 
 def write_export(planned: Planned, out: Path | None = None, video: Path | None = None, fps: float = 24,
@@ -182,7 +196,8 @@ def write_export(planned: Planned, out: Path | None = None, video: Path | None =
     after = Meter()
     written = apply_finish(planned.plan, out=out, video=video, fps=fps, width=width,
                            progress=tracker.stage("Writing") if tracker else None, fmt=fmt, codec=codec,
-                           dither=dither, meter=after)
+                           dither=dither, meter=after,
+                           finalising=(lambda: tracker.stage("Finishing the video file")(0, 0)) if tracker else None)
     check = after.series()
     findings = review_frames(check, [f.name for f in planned.frames])
     where = Path(out) if out else Path(video).with_name(Path(video).stem + ".timelapse-report.json")

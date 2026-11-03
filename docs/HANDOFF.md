@@ -301,3 +301,12 @@ Phase 1 results on James's PC are recorded in GUI_PLAN.md (Flet accepted; ADR-00
 Phase 2 step 1, app services (`harbium_timelapse.app`): `config` (preferences, recent projects, per-user config dir, `HARBIUM_CONFIG`), `project` (stage/settings/dismissed flags in `.timelapse-core/project.json`, versioned), `jobs` (thread runner, progress thinned to ~10/s, cancel via the token, plain-English failures), `session` (open_folder, measure once, preview/apply/undo with `raw_brightness`, export_status for noticing the export, plan_export/write_export shared with the CLI). Editors' `prepare` accepts `raw_brightness` (RapidRAW now too).
 
 Two bugs found and fixed: video-only `finish` runs never saved their report (`report.write` now accepts a .json path; regression test); the moving-camera check raised false alarms on featureless frames (plain sky, fog): `review.shift` now returns a confidence, only matches ≥ 0.1 count (real matches 0.4–1, featureless 0.04), and with too few confident pairs the answer is "can't tell" (regression test).
+
+
+---
+
+## Addendum 10 — 3 Nov 2026: first end-to-end app run, measurement cache
+
+James ran the app from source on his PC with the dusk sequence (a copy of the RAW folder, `final-export` for finishing): Folder, Prepare (measure, preview, apply), Grade (chose the export), Finish (Master), Done. Results matched the command line exactly (brightness wobble 0.041 to 0.012 stops, colour 0.028 to 0.008); light mode and Cancel worked.
+
+Changes from that run: `measure_cache.py` keeps whole-folder measurement results (RAW brightness for Prepare, export channels and camera motion for Finish) in the user cache, keyed by every file's path, size and mtime plus `METHOD`; plain numpy arrays loaded with `allow_pickle=False`; any change re-measures. Finishing shows a "Finishing the video file" stage after the last frame (x265 holds frames back and flushes at the end; it sat silent ~30 s). Master is now H.265 10-bit up to 4K, and x265 uses the medium preset (measured 2.7x faster than slow at CRF 18, similar size); at full 5.5K with slow it took 3-5 s a frame. Measuring speed on James's drive is limited by its ~48 MB/s link (a USB 2-speed cable or enclosure).
