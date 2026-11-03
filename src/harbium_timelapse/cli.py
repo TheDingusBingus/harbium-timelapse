@@ -48,6 +48,11 @@ def _main(argv: list[str] | None = None) -> int:
     rev.add_argument("folder", type=Path, help="frames to look over: a finished export, or any folder of frames")
     rev.add_argument("--json", type=Path, default=None, help="also save the findings to this file")
 
+    tone = sub.add_parser("tone-check", help="does the correction treat shadows, midtones and highlights alike? "
+                                             "Compares frames before and after finish (reads only)")
+    tone.add_argument("before", type=Path, help="the frames before finish, e.g. your export")
+    tone.add_argument("after", type=Path, help="the corrected frames from finish --out (same names)")
+
     check = sub.add_parser("check", help="look over a sequence before processing")
     check.add_argument("folder", type=Path)
 
@@ -134,6 +139,8 @@ def _main(argv: list[str] | None = None) -> int:
         return _finish(args)
     if args.command == "review":
         return _review(args)
+    if args.command == "tone-check":
+        return _tone_check(args)
 
     def reading(i: int, n: int) -> None:
         print(f"\r  Reading camera settings {i}/{n}", end="", file=sys.stderr, flush=True)
@@ -303,6 +310,30 @@ def _print_findings(findings, n: int) -> None:
     if len(by_frame) > 10:
         print(f"    and {len(by_frame) - 10} more")
     print(f"  (The first and last {min(EDGE, n)} frames can't be judged: they have neighbours on one side only.)")
+
+
+def _tone_check(args) -> int:
+    from .tonecheck import check_folders, lagging, verdict
+    try:
+        bands, n = check_folders(args.before, args.after, _show_progress_plain("Reading"))
+    except (ValueError, OSError) as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    print(f"{n} frames compared. Frame-to-frame jitter (stops), trend removed:")
+    print(f"  {'band':11s} {'pixels':>7s} {'before':>8s} {'after':>8s}")
+    for b in bands:
+        flag = "   worse" if b.worse else ("   barely steadier" if b in lagging(bands) else "")
+        print(f"  {b.name:11s} {b.share * 100:6.0f}% {b.before:8.4f} {b.after:8.4f}   kept {b.kept * 100:3.0f}%{flag}")
+    print(verdict(bands))
+    return 0
+
+
+def _show_progress_plain(word):
+    def hook(i, n):
+        print(f"\r  {word} {i}/{n}", end="", file=sys.stderr, flush=True)
+        if i == n:
+            print(file=sys.stderr)
+    return hook
 
 
 def _review(args) -> int:
