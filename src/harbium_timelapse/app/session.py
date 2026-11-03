@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import measure_cache
-from . import previews
+from .. import previews
 from .. import report as run_report
 from ..editors import detect
 from ..editors.base import Editor, PrepareReport
@@ -75,7 +75,7 @@ def measure(seq: Sequence, tracker: Tracker | None = None) -> np.ndarray:
     if cached is not None:
         return cached["brightness"]
     brightness = measure_brightness(seq, progress=tracker.stage("Measuring") if tracker else None,
-                                    on_image=lambda i, img: previews.save(paths[i], img))
+                                    previews=True)
     measure_cache.save(paths, "raw-brightness", {"brightness": brightness})
     return brightness
 
@@ -111,9 +111,7 @@ def ensure_previews(seq: Sequence, tracker: Tracker | None = None) -> int:
     paths = [f.path for f in seq]
     todo = previews.missing(paths)
     hook = tracker.stage("Making previews") if tracker else None
-    for done, (i, (image, _)) in enumerate(zip(todo, ordered_map(_load_for_measuring,
-                                                                  [(paths[i], "careful") for i in todo])), 1):
-        previews.save(paths[i], image)
+    for done, _ in enumerate(ordered_map(_load_for_measuring, [(paths[i], "careful", True) for i in todo]), 1):
         if hook:
             hook(done, len(todo))
     return len(todo)

@@ -48,6 +48,7 @@ def measure_brightness(
     speed: str = "careful",
     progress: Progress | None = None,
     on_image=None,
+    previews: bool = False,
 ) -> np.ndarray:
     """Brightness of every frame, in stops. Higher is brighter.
 
@@ -55,7 +56,7 @@ def measure_brightness(
     difference between frames: 0.1 apart means one frame is a tenth of a
     stop brighter than the other.
     """
-    return measure_light(frames, speed=speed, progress=progress, on_image=on_image)[0]
+    return measure_light(frames, speed=speed, progress=progress, on_image=on_image, previews=previews)[0]
 
 
 def measure_light(
@@ -64,6 +65,7 @@ def measure_light(
     progress: Progress | None = None,
     steady: bool = True,
     on_image=None,
+    previews: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Brightness and warmth of every frame.
 
@@ -90,7 +92,7 @@ def measure_light(
     profiles = np.empty((len(paths), _PERCENTS.size))
     warmth = np.empty(len(paths))
     chain = SteadyChain()
-    loaded = ordered_map(_load_for_measuring, [(path, speed) for path in paths])
+    loaded = ordered_map(_load_for_measuring, [(path, speed, previews) for path in paths])
     for i, (image, warmth[i]) in enumerate(loaded):
         profiles[i] = tone_profile(image)
         chain.add(steady_input(image))
@@ -328,23 +330,25 @@ def warmth_of(linear_rgb: np.ndarray) -> float:
 
 def _load_for_measuring(job: tuple[Path, str]) -> tuple[np.ndarray, float]:
     """One frame's small linear image and warmth. Runs in a worker process."""
-    path, speed = job
+    path, speed, *rest = job
     try:
-        return _load(path, speed)
+        return _load(path, speed, preview=bool(rest and rest[0]))
     except ImportError:
         raise
     except Exception as e:
         raise ValueError(f"Couldn't read the picture in {path.name}. Is the file complete? ({e})") from e
 
 
-def _load(path: Path, speed: str) -> tuple[np.ndarray, float]:
+def _load(path: Path, speed: str, preview: bool = False) -> tuple[np.ndarray, float]:
     if path.suffix.lower() in RAW_EXTENSIONS:
-        return _load_raw(path, speed)
-    if path.suffix.lower() in (".tif", ".tiff"):
-        rgb = _load_tiff(path)
-        if rgb is not None:
-            return rgb, warmth_of(rgb)
-    rgb = _load_image(Image.open(path))
+        return _load_raw(path, speed, preview)
+    if preview:                       # exported frames too: a big preview from the full picture
+        from . import previews
+        with Image.open(path) as im:
+            previews.save(path, _srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float32) / 255.0))
+    rgb = _load_tiff(path) if path.suffix.lower() in (".tif", ".tiff") else None
+    if rgb is None:
+        rgb = _load_image(Image.open(path))
     return rgb, warmth_of(rgb)
 
 
@@ -362,7 +366,7 @@ def _load_tiff(path: Path) -> np.ndarray | None:
     return _srgb_to_linear(_shrink(arr[..., :3]).astype(np.float64) / levels)
 
 
-def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:
+def _load_raw(path: Path, speed: str, preview: bool = False) -> tuple[np.ndarray, float]:
     try:
         import rawpy
     except ImportError as e:
@@ -409,6 +413,9 @@ def _load_raw(path: Path, speed: str) -> tuple[np.ndarray, float]:
             output_color=rawpy.ColorSpace.sRGB,
             user_flip=0,
         )
+    if preview:                       # the app's preview, saved here so the big image never leaves this worker
+        from . import previews
+        previews.save(path, rgb.astype(np.float32) / 65535.0)
     return _shrink(rgb) / 65535.0, warmth
 
 

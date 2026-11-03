@@ -324,7 +324,7 @@ class AppModel:
         if self.opened is None or self.opened.editor is None or self.preview_images is not None:
             return
         seq = self.opened.seq
-        from ...app import previews
+        from ... import previews
 
         def work(t):
             from ...timeslice import MODES, Slice
@@ -336,7 +336,7 @@ class AppModel:
                     return None
                 if slices is None:
                     h, w = image.shape[:2]
-                    slices = {mode: Slice(h, w, len(seq), mode) for mode in MODES}
+                    slices = {mode: Slice(h, w, len(seq), mode, dtype=np.float16) for mode in MODES}   # half precision
                 if image.shape[:2] != (slices["left-right"].h, slices["left-right"].w):
                     return None                   # previews of different sizes: can't make one picture
                 for s in slices.values():

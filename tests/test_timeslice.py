@@ -83,3 +83,15 @@ def test_a_slice_keeps_one_pictures_worth_of_pixels_however_long_the_sequence():
     from harbium_timelapse.timeslice import Slice
     s = Slice(30, 40, 2000, "clockwise")
     assert s.values.shape == (30 * 40, 3)
+
+
+def test_measuring_makes_big_previews_itself(tmp_path):
+    from harbium_timelapse import previews as library_previews
+    folder = tmp_path / "big"
+    folder.mkdir()
+    for i in range(3):
+        Image.fromarray(np.full((1200, 2400, 3), 60 + 40 * i, np.uint8)).save(folder / f"f{i}.jpg")
+    paths = sorted(folder.iterdir())
+    measure_brightness(paths, previews=True)
+    assert library_previews.missing(paths) == []
+    assert max(library_previews.load(paths[0]).shape[:2]) == library_previews.SIZE      # 1,600 on the long edge

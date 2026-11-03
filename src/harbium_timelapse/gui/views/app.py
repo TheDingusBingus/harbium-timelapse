@@ -115,14 +115,16 @@ class SlicePanel:
 
     def control(self) -> ft.Control:
         ui = self.ui
-        side = lambda label, image: ft.Column([ui.text(label, size=13), image], spacing=4)   # noqa: E731
+        def side(label, image):
+            return ft.Column([ui.text(label, size=13),
+                              ft.Container(image, on_click=lambda e: SliceViewer(self.screen.view).open())], spacing=4)
         from ...timeslice import MODES
         chooser = ft.Dropdown(options=[ft.DropdownOption(key=k, text=t) for k, t in MODES.items()],
                               value=self.m.slice_mode, width=230, dense=True,
                               on_select=lambda e: self.m.set_slice_mode(e.control.value))
         return ft.Container(ui.panel(ft.Column(
             [ft.Row([ui.text("Time slice: the scene, with time running", dim=True, size=13), chooser], spacing=8),
-             ui.text(self.words, dim=True, size=12), self.status,
+             ui.text(self.words + " Click a picture to see it full screen.", dim=True, size=12), self.status,
              ft.Container(ft.Row([side("Before", self.before), side("After", self.after)], spacing=8),
                           bgcolor=ui.t["surround"], padding=6, border_radius=2)], spacing=6), padding=12),
             width=self.WIDTH)
@@ -149,6 +151,97 @@ class SlicePanel:
                                                                asyncio.to_thread(make, pictures[1]))
         self.before.visible = self.after.visible = True
         self.screen.view.page.update()
+
+
+class SliceViewer:
+    """The time slice filling the window: Before and After side by side (or one alone), zoomable, with the mode
+    chooser and Save buttons. Esc or Close goes back."""
+    current = None
+
+    def __init__(self, view: "View"):
+        self.view, self.m, self.ui = view, view.model, view.ui
+        self.show = "both"
+
+    def open(self) -> None:
+        SliceViewer.current = self
+        self.layer = ft.Container(expand=True, bgcolor=self.ui.t["surround"], padding=12)
+        self.view.page.overlay.append(self.layer)
+        self.view.page.run_task(self.draw)
+
+    def close(self, e=None) -> None:
+        if self.layer in self.view.page.overlay:
+            self.view.page.overlay.remove(self.layer)
+        SliceViewer.current = None
+        self.view.page.update()
+
+    def choose(self, show: str) -> None:
+        self.show = show
+        self.view.page.run_task(self.draw)
+
+    def set_mode(self, mode: str) -> None:
+        self.m.set_slice_mode(mode)
+        self.view.page.run_task(self.draw)
+
+    def save(self, which: str) -> None:
+        from PIL import Image
+        pictures = self.m.time_slice()
+        folder = Path(self.m.opened.seq.folder)
+        if pictures is None:
+            return
+        target = folder.parent / f"{folder.name} time slice ({self.m.slice_mode}) {which}.png"
+        try:
+            Image.fromarray(pictures[0 if which == "before" else 1]).save(target)
+            self.m._notice(f"Saved {target}")
+        except OSError as e:
+            self.m._notice(f"Couldn't save the picture: {e}", "error")
+        self.m.changed()
+        self.view.page.update()
+
+    async def draw(self):
+        import io
+        from PIL import Image
+        from ...timeslice import MODES
+        ui, pictures = self.ui, self.m.time_slice()
+        if pictures is None:
+            self.close()
+            return
+
+        def encode(picture) -> bytes:
+            buf = io.BytesIO()
+            Image.fromarray(picture).save(buf, format="JPEG", quality=92)
+            return buf.getvalue()
+        before, after = await asyncio.gather(asyncio.to_thread(encode, pictures[0]),
+                                             asyncio.to_thread(encode, pictures[1]))
+
+        page = self.view.page
+        width = max(640, int(page.width or 1280)) - 48                  # the window, less the margins
+        height = max(400, int(page.height or 800)) - 150                # less the bar and the hint
+        each = width if self.show != "both" else (width - 12) // 2
+
+        def big(label, data):
+            return ft.Column([ft.Text(label, color="#ffffff", size=14),
+                              ft.Container(ft.InteractiveViewer(content=ft.Image(src=data, width=each, height=height,
+                                                                                 fit=ft.BoxFit.CONTAIN),
+                                                                min_scale=1, max_scale=8,
+                                                                boundary_margin=ft.Margin.all(60)),
+                                           width=each, height=height, clip_behavior=ft.ClipBehavior.HARD_EDGE)],
+                             spacing=6)
+        shown = {"both": [big("Before", before), big("After", after)], "before": [big("Before", before)],
+                 "after": [big("After", after)]}[self.show]
+        pick = lambda label, key: (ui.primary if self.show == key else ui.secondary)(label, lambda e: self.choose(key))  # noqa: E731
+        bar = ft.Container(ft.Row([
+            ft.Row([ft.Dropdown(options=[ft.DropdownOption(key=k, text=t) for k, t in MODES.items()],
+                                value=self.m.slice_mode, width=230, dense=True,
+                                on_select=lambda e: self.set_mode(e.control.value)),
+                    pick("Side by side", "both"), pick("Before only", "before"), pick("After only", "after")], spacing=8),
+            ft.Row([ui.secondary("Save Before", lambda e: self.save("before")),
+                    ui.secondary("Save After", lambda e: self.save("after")),
+                    ui.primary("Close", self.close)], spacing=8)],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN), bgcolor=ui.t["panel"], padding=10, border_radius=2)
+        self.layer.content = ft.Column([bar, ft.Row(shown, spacing=12),
+                                        ft.Text("Scroll to zoom, drag to look around. Esc closes.", color="#e8e4db",
+                                                size=12)], spacing=10)
+        self.view.page.update()
 
 
 class StartScreen(Screen):
@@ -613,7 +706,12 @@ class View:
         self.screen_name = None
         self._build_shell()
         model.subscribe(self.refresh)
+        page.on_keyboard_event = self._key
         self.refresh()
+
+    def _key(self, e) -> None:
+        if e.key == "Escape" and SliceViewer.current is not None:
+            SliceViewer.current.close()
 
     async def ask(self, method: str, **kwargs):
         """Open a file dialog. If the window doesn't answer (Flet 1.0 sometimes loses track of a
