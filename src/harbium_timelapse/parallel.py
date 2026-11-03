@@ -14,6 +14,7 @@ does the same work one frame at a time. The results are identical either way.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
@@ -48,7 +49,10 @@ def ordered_map(fn: Callable[[T], R], items: Iterable[T], workers: int | None = 
         return
     done = 0
     try:
-        pool = ProcessPoolExecutor(max_workers=workers)
+        # "spawn" (a fresh interpreter per worker) on every platform: it's what Windows always uses, and on
+        # Linux the default ("fork") copies the program mid-flight, which can deadlock a worker when the app
+        # has background threads running (Python warns about exactly this).
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"))
     except (OSError, NotImplementedError, ValueError):
         yield from map(fn, items)
         return

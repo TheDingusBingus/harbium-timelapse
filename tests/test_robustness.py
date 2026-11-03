@@ -194,3 +194,20 @@ def test_a_mostly_black_region_gets_no_say():
     odd = ~crushed & (np.arange(before.shape[1]) < before.shape[1] // 2)
     after[odd] *= 4                                              # and its survivors misbehave
     assert abs(steady_change(before, after) - 0.25) < 0.02
+
+
+def test_workers_start_safely_while_the_app_has_threads_running():
+    """Regression: on Linux, worker processes were forked while background-job threads ran,
+    which can deadlock a worker (CI showed Python's warning about it). Workers now spawn everywhere."""
+    import threading
+    import warnings
+    from harbium_timelapse.parallel import ordered_map
+    stop = threading.Event()
+    busy = threading.Thread(target=stop.wait, daemon=True)
+    busy.start()                                      # like a background job running in the app
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            assert list(ordered_map(abs, [-3, 1, -2, 5, -9], workers=2)) == [3, 1, 2, 5, 9]
+    finally:
+        stop.set()
