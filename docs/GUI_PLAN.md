@@ -1073,7 +1073,7 @@ S2 to S5 run on both reference machines (section 7). For the minimum machine, an
 
 ### Phase 2: the first working app
 
-Progress: step 1 of 4 done (app services: `app/config.py`, `app/project.py`, `app/jobs.py`, `app/session.py`; the command line's `finish` now runs on the same session steps). Jobs run on a thread with cooperative cancel for now: the heavy decoding already runs in worker processes, and a job in its own process (ADR-003) is kept for when a job type needs a forced stop.
+Progress: steps 1 and 2 of 4 done. Step 1, app services: `app/config.py`, `app/project.py`, `app/jobs.py`, `app/session.py`; the command line's `finish` now runs on the same session steps. Step 2, view models: `gui/models/app.py` (`AppModel`: every screen's state and commands, the stage bar's rules, one job at a time, latest-only previews, export watching, finish presets Share/Master/Edit, the review list) and `gui/models/timeline.py` (the app-drawn timeline and click-to-frame), tested end to end without a window. Jobs run on a thread with cooperative cancel for now: the heavy decoding already runs in worker processes, and a job in its own process (ADR-003) is kept for when a job type needs a forced stop.
 
 Start screen, project overview with the folder check, prepare with preview and apply, hand-off, finish, progress and cancel throughout, undo, recovery. Simple timeline (measured and curve).
 
